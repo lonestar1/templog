@@ -269,9 +269,11 @@ def render_svg(run, settings=None, plateau=None):
 
 
 HTML_TEMPLATE = """<!doctype html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>__TITLE__</title>
 <style>
   body{font-family:system-ui,sans-serif;margin:24px;color:#222;background:#fff;}
+  @media (max-width:760px){ body{margin:12px;} h1{font-size:15px;} }
   h1{font-size:17px;margin:0 0 2px;}
   .sub{color:#666;font-size:12px;margin-bottom:14px;}
   .chart{overflow-x:auto;}

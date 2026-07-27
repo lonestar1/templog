@@ -114,8 +114,8 @@ class Runner(object):
 
         self._ensure_header()
         if resume_state:
-            self._write_row(_iso(), "", "",
-                            "service restarted -- logging resumed")
+            self._write_row(_iso(), "", "", resume_state.get(
+                "marker", "service restarted -- logging resumed"))
 
         self.running = True
         self.stop_event.clear()
@@ -435,6 +435,26 @@ class Runner(object):
             "alerts": self.alerts,
             "notes": self.notes[-20:],
         }
+
+
+def first_timestamp(csv_path):
+    """Epoch seconds of the first real reading in a run, or None.
+
+    Manual resume needs the ORIGINAL start, not now: the schedule grid and the
+    elapsed/duration figures are all measured from it.
+    """
+    try:
+        with open(csv_path) as fh:
+            for row in csv.DictReader(fh):
+                stamp = row.get("timestamp") or ""
+                try:
+                    return datetime.datetime.strptime(
+                        stamp, "%Y-%m-%dT%H:%M:%S.%f").timestamp()
+                except (ValueError, OverflowError):
+                    continue
+    except OSError:
+        return None
+    return None
 
 
 def resume_if_interrupted(service):

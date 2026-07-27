@@ -27,6 +27,7 @@ import os
 import socketserver
 import sys
 import threading
+import time
 
 from http import server
 from urllib.parse import urlparse, parse_qs
@@ -201,6 +202,7 @@ class Service(object):
 # SyntaxError that stops the whole script parsing, so every handler vanishes
 # and every button silently does nothing. Keep the r.
 PAGE = r"""<!doctype html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Still Monitor</title>
 <style>
   body{font-family:system-ui,sans-serif;background:#111;color:#eee;margin:0;
@@ -281,6 +283,33 @@ PAGE = r"""<!doctype html><html><head><meta charset="utf-8">
   table.runs a{color:#8cf;}
   table.runs .live{color:#6f6;}
   table.runs button{font-size:11px;padding:2px 8px;}
+
+  /* ---- phone layout -------------------------------------------------
+     The panel is checked from a phone mid-run, so Monitor has to be usable
+     one-handed: the three tuner previews stop sitting side by side, controls
+     go full width, and tap targets grow. The runs table scrolls sideways
+     rather than squashing its columns. */
+  @media (max-width: 760px){
+    body{padding:6px 10px 40px;font-size:14px;}
+    .top{gap:10px;}
+    #readout{font-size:38px;}
+    .views{flex-direction:column;}
+    .view img{max-height:34vh;}
+    .ctrl{flex-wrap:wrap;gap:6px;}
+    .ctrl label{width:100%;}
+    .ctrl input[type=range]{min-width:0;width:100%;}
+    .stat{min-width:74px;}
+    .stat .val{font-size:15px;}
+    button{padding:9px 14px;font-size:14px;}
+    .tabbtn{flex:1;padding:11px 8px;}
+    #setuplocked{display:none !important;}
+    .notebtns button{flex:1 1 44%;}
+    input[type=text],input[type=number],select{font-size:16px;}
+    #notetext{width:100% !important;}
+    .runswrap{overflow-x:auto;}
+    table.runs{min-width:520px;}
+    .row{gap:8px;}
+  }
 </style></head><body>
 
 <div class="top">
@@ -351,7 +380,7 @@ PAGE = r"""<!doctype html><html><head><meta charset="utf-8">
     <button onclick="saveChart()">Save chart</button>
     <span id="chartstatus" style="color:#8f8;font-size:12px"></span>
   </h3>
-  <table class="runs" id="runs"></table>
+  <div class="runswrap"><table class="runs" id="runs"></table></div>
 </div>
 
 </div><!-- end MONITOR -->
@@ -793,6 +822,21 @@ function saveChart(file){
   });
 }
 
+// Continue logging into an existing run rather than opening a new file.
+// Offered on the newest run only -- resuming an older one would interleave
+// readings into a file whose chart has already been written.
+function resumeRun(file){
+  if(!confirm("Resume logging into " + file + "?"))
+    return;
+  el("chartstatus").textContent = "resuming…";
+  post("/resume_run", {file:file}, function(d){
+    if(d.error){ el("chartstatus").textContent = d.error; return; }
+    el("chartstatus").textContent = "resumed " + d.resumed;
+    applyStatus(d);
+    loadRuns();
+  });
+}
+
 function deleteRun(file){
   if(!confirm("Delete " + file + " and its chart?\nThis cannot be undone."))
     return;
@@ -810,7 +854,9 @@ function renderRuns(runs){
   }
   var html = "<tr><th>run</th><th>readings</th><th>notes</th><th>size</th>" +
              "<th>chart</th><th></th></tr>";
-  runs.forEach(function(r){
+  runs.forEach(function(r, index){
+    // newest run only, and only when nothing is logging
+    var canResume = (index === 0) && !RUNNING && r.readings > 0;
     var kb = (r.bytes/1024).toFixed(1) + " kB";
     html += "<tr>" +
       "<td>" + r.csv + (r.active ? ' <span class="live">● logging</span>' : "") + "</td>" +
@@ -823,6 +869,8 @@ function renderRuns(runs){
       '<td><button onclick="viewChart(\'' + r.csv + '\')">chart</button> ' +
       '<button onclick="saveChart(\'' + r.csv + '\')">save</button> ' +
       '<a href="/download?file=' + encodeURIComponent(r.csv) + '">csv</a> ' +
+      (canResume ?
+        '<button onclick="resumeRun(\'' + r.csv + '\')">resume</button> ' : "") +
       (r.active ? "" :
         '<button onclick="deleteRun(\'' + r.csv + '\')">delete</button>') +
       "</td></tr>";
@@ -1118,6 +1166,47 @@ class Handler(server.BaseHTTPRequestHandler):
 
         elif path == "/stop":
             self._json(svc.runner.stop())
+
+        elif path == "/resume_run":
+            # Continue logging into an existing CSV instead of starting a new
+            # file -- for when a run was stopped and shouldn't have been.
+            try:
+                target = svc.run_path(data.get("file"), (".csv",))
+            except ValueError as exc:
+                self._json({"error": str(exc)}, code=400)
+                return
+            if svc.runner.running:
+                self._json({"error": "already logging"}, code=409)
+                return
+            if not os.path.exists(target):
+                self._json({"error": "no such run"}, code=404)
+                return
+            started_at = runner.first_timestamp(target)
+            if started_at is None:
+                self._json({"error": "that run has no readings to resume from"},
+                           code=409)
+                return
+            # Duration is measured from the ORIGINAL start. If it has already
+            # elapsed, resuming under it would stop again immediately, so fall
+            # back to running until stopped rather than silently doing nothing.
+            duration = float(svc.settings["duration_hours"])
+            note = ""
+            if duration > 0 and (time.time() - started_at) >= duration * 3600.0:
+                duration = 0
+                note = " (duration already elapsed; running until stopped)"
+            try:
+                status = svc.runner.start(resume_state={
+                    "csv_path": target,
+                    "started_at": started_at,
+                    "interval": svc.settings["interval"],
+                    "duration_hours": duration,
+                    "marker": "logging resumed",
+                })
+            except RuntimeError as exc:
+                self._json({"error": str(exc)}, code=409)
+                return
+            status["resumed"] = os.path.basename(target) + note
+            self._json(status)
 
         elif path == "/note":
             try:

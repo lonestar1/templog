@@ -12,6 +12,7 @@
 #   ./deploy.sh                    # copy code, restart the service
 #   ./deploy.sh --check            # Python 3.5 syntax gate only, no deploy
 #   ./deploy.sh --install-service  # install/refresh the systemd unit, then deploy
+#   ./deploy.sh --force            # deploy even with a run active; it resumes
 #
 set -euo pipefail
 
@@ -66,11 +67,20 @@ fi
 # Refuse to interrupt a run in progress -- a still run is hours long.
 echo "==> checking for a run in progress"
 if ssh -n "$PI" "test -f ~/${REMOTE_DIR}/run_state.json"; then
-  echo "    REFUSING: a logging run is active on the Pi." >&2
-  echo "    Stop it from the control panel first." >&2
-  exit 1
+  if [[ "$mode" == "--force" ]]; then
+    # Safe because the restart path is proven: the run resumes into the same
+    # CSV, stays on the original schedule grid, and writes a marker row at the
+    # gap. Still a deliberate act -- it puts a marker in someone's data.
+    echo "    a run is ACTIVE -- --force given, it will resume after restart"
+  else
+    echo "    REFUSING: a logging run is active on the Pi." >&2
+    echo "    Stop it from the control panel, or use --force to restart" >&2
+    echo "    under it (the run resumes into the same CSV)." >&2
+    exit 1
+  fi
+else
+  echo "    idle"
 fi
-echo "    idle"
 
 echo "==> copying code"
 scp -q "${FILES[@]}" "${PI}:${REMOTE_DIR}/"
