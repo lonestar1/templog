@@ -1,0 +1,23 @@
+[Unit]
+Description=Still Monitor - thermometer OCR logger and control panel
+After=network.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/Documents/templog
+# -u keeps output unbuffered so journalctl shows it live. Without it, output is
+# block-buffered when not a tty and the log looks empty while the run is fine.
+ExecStart=/usr/bin/python3 -u /home/pi/Documents/templog/stillmon.py
+
+# A still run is hours long and unattended: come back automatically from a
+# crash, and let the service resume the interrupted run from run_state.json.
+Restart=always
+RestartSec=5
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=stillmon
+
+[Install]
+WantedBy=multi-user.target

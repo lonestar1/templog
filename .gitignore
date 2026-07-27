@@ -25,8 +25,12 @@ logger.out
 stillmon.out
 nohup.out
 
-# Runtime state — per-machine, not shared
+# Runtime state — per-machine, not shared.
+# settings.json is whatever was last chosen in the UI on that machine;
+# committing it would let a deploy overwrite the Pi's real configuration.
+# The defaults in config.py are the source of truth.
 run_state.json
+settings.json
 *.bak
 
 # Secrets (web UI password, etc.)
