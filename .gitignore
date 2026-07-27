@@ -22,7 +22,12 @@ temps_*.html
 
 # Process output
 logger.out
+stillmon.out
 nohup.out
+
+# Runtime state — per-machine, not shared
+run_state.json
+*.bak
 
 # Secrets (web UI password, etc.)
 secrets.json
