@@ -10,10 +10,6 @@ The display can't be tapped electrically, hence the camera. It turns out to be a
 sensor: a validated run produced 216 readings with zero misreads, and later runs have held an
 exact 30.00 s cadence across service restarts.
 
-<!-- Photos: drop them in images/ and link them here, e.g.
-     ![The camera rig](images/rig.jpg)
-     ![The control panel](images/panel.png) -->
-
 ## What it does
 
 - **Tunes** the crop box, threshold and brightness/contrast live in the browser, with a
@@ -30,12 +26,35 @@ exact 30.00 s cadence across service restarts.
 
 ## How it works
 
-Each reading:
+Each reading passes through three stages. These are real images taken straight off the Pi:
+
+**1. Capture the frame.** Auto-exposure, half resolution. The display is a small bright patch in
+a mostly dark scene — which is exactly why the exposure has to be left alone and everything else
+done in software.
+
+![The full camera frame](images/pipeline-1-frame.png)
+
+**2. Crop and adjust.** The tuned crop box isolates the digits, and brightness/contrast are
+applied before thresholding. Note what's been deliberately excluded: the `°C` symbol at the top
+right. Leave it in and `ssocr` counts it as a fourth digit and the whole reading fails.
+
+![The cropped digits](images/pipeline-2-crop.png)
+
+**3. Threshold and decode.** What `ssocr` actually sees, with its segment-detection overlay. The
+threshold is set high so dim glare falls away while the LEDs survive.
+
+![What ssocr sees](images/pipeline-3-threshold.png)
+
+The decoded digits are `160`. The decimal point is then inserted by us — `16.0` — because
+`ssocr`'s own dot detection is unreliable on a multiplexed display. Finally the value is
+range-gated to reject anything physically impossible.
+
+In commands:
 
 1. `raspistill -o frame.jpg -w 820 -h 616 -t 500 -n` — auto-exposure, half resolution
 2. `convert frame.jpg -crop {geometry} +repage -brightness-contrast {b}x{c} crop.png`
-3. `ssocr -d 3 -t {threshold} make_mono invert crop.png` → e.g. `165`
-4. Strip dots, insert the decimal point manually (`165` → `16.5`), then range-gate the result
+3. `ssocr -d 3 -t {threshold} make_mono invert crop.png` → e.g. `160`
+4. Strip dots, insert the decimal point manually (`160` → `16.0`), then range-gate the result
 
 Crop coordinates live in capture-resolution space. Changing the resolution from the panel
 rescales the crop box automatically so the tuning survives, but the reading is worth
@@ -180,6 +199,13 @@ If `avahi-daemon` is running (it is by default on Raspberry Pi OS), the panel is
 that name.
 
 ## Using it
+
+<!-- Screenshots still to add — take these from a browser and drop them in images/:
+       images/panel-monitor.png    the Monitor tab mid-run, ideally with an alert showing
+       images/panel-tuning.png     the Setup tab, three panels and sliders
+       images/chart.png            a saved run chart with note markers
+       images/rig.jpg              the camera pointed at the thermostat
+     then link them with:  ![The Monitor tab](images/panel-monitor.png)          -->
 
 The panel has two tabs. **Monitor** is what you watch during a run; **Setup & tuning** holds
 everything you configure beforehand and is locked while logging, because the camera can't tune
