@@ -154,6 +154,11 @@ class PiBackend(object):
         """Decode digits. Returns (raw_string, stderr_string).
 
         `invert` is required and `-d N` must stay fixed -- see module docstring.
+
+        `threshold` is a PERCENTAGE, 0-100. ssocr rejects anything outside that
+        and silently uses its own default of 50, which makes an out-of-range
+        value look like it is doing something when it is not. config.py
+        normalises stored values; this is the note for anyone calling directly.
         """
         cmd = ["ssocr", "-d", str(int(num_digits)), "-t", str(int(threshold))]
         if debug_image:

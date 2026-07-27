@@ -44,10 +44,17 @@ RESOLUTIONS = [
     (3280, 2464),
 ]
 
+# ssocr's -t is a PERCENTAGE, 0-100. Anything outside that range is rejected
+# and ssocr silently falls back to its own default of 50 -- so a "threshold" of
+# 130 or 227 was never higher than one of 50, it *was* 50. This cost real
+# debugging time, because the control looked like it was doing something.
+SSOCR_THRESHOLD_MAX = 100
+SSOCR_THRESHOLD_DEFAULT = 50
+
 CROP_DEFAULTS = {
     "x": 330, "y": 300, "w": 200, "h": 120,
     "top_trim": 0,        # px shaved off the top, to cut a glare bridge
-    "threshold": 130,     # ssocr luminance cut; high drops dim glare
+    "threshold": SSOCR_THRESHOLD_DEFAULT,   # percent, see above
     "brightness": 0,      # -100..100, applied in software
     "contrast": 0,        # -100..100, applied in software
     "cap_w": 820,         # the resolution the coords above belong to
@@ -155,6 +162,21 @@ def load_crop():
         for key in CROP_INT_KEYS:
             if key in saved:
                 crop[key] = _coerce_int(saved[key], crop[key])
+    return normalise_threshold(crop)
+
+
+def normalise_threshold(crop):
+    """Bring an out-of-range threshold in line with what ssocr actually did.
+
+    Existing tunings hold values like 130 or 227 because the slider used to
+    allow them. ssocr rejected those and used 50, so rewriting them to 50 is
+    behaviour-preserving -- the thresholded image is byte-identical. Clamping
+    to 100 instead would silently CHANGE the tuning, and 100 is inside a band
+    where this display fails.
+    """
+    value = int(crop.get("threshold", SSOCR_THRESHOLD_DEFAULT))
+    if value > SSOCR_THRESHOLD_MAX or value < 0:
+        crop["threshold"] = SSOCR_THRESHOLD_DEFAULT
     return crop
 
 
@@ -171,6 +193,7 @@ def save_crop(crop):
     payload = {}
     for key in CROP_INT_KEYS:
         payload[key] = _coerce_int(crop.get(key), CROP_DEFAULTS[key])
+    normalise_threshold(payload)
     geometry, _ = effective_crop(payload)
     payload["geometry"] = geometry
     payload["saved"] = datetime.datetime.now().isoformat()

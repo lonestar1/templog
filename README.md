@@ -294,6 +294,24 @@ Hard-won, and worth knowing before changing anything:
   auto-exposure and do *all* image adjustment in software.
 - **Use `ssocr -d 3`, not `-d -1`.** Auto-count invents phantom `1`s from noise and returns long
   garbage strings; a fixed digit count fails cleanly instead.
+- **`ssocr -t` is a percentage, 0–100.** Anything outside that range is rejected and `ssocr`
+  silently falls back to its own default of **50** — so a "threshold" of 130 and one of 227
+  aren't different settings, they're both 50, and the thresholded image is byte-identical.
+  This project shipped a 10–254 slider for a while and wasted real debugging time on a control
+  that did nothing above 100. Stored values above 100 are rewritten to 50 on load, which
+  preserves behaviour exactly.
+- **The usable threshold band is narrow and not where you'd guess.** On this display, with
+  brightness/contrast tuned, decoding works from about 15 to 55 and fails from 60 to 100 as
+  noise gets counted as extra digits. Sweep it rather than nudging it — a value that works may
+  be sitting at the edge of the band.
+- **Brightness does more than threshold.** With no brightness/contrast adjustment, a glare-lit
+  display misread at 15 of 21 thresholds tested; with it, 20 of 21 worked. If glare appears,
+  reach for brightness first.
+- **Colour separation does not help here.** Isolating "redness" (`R−B`, `R−G`, `R−max(G,B)`) to
+  reject white glare is an appealing idea and it fails badly: measured 0 of 21 thresholds
+  decoding correctly, versus 20 for plain brightness/contrast. Two reasons — bright LED cores
+  overexpose towards white and lose their colour, and the worst glare is a reflection *of the
+  red display*, so it shares the digits' hue.
 - **`invert` is required** — the display is bright-on-dark and `ssocr` wants dark-on-light.
 - **The decimal point is inserted by us, not read by `ssocr`** — its dot detection is unreliable
   on a multiplexed display.

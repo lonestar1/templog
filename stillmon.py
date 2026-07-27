@@ -424,8 +424,8 @@ PAGE = r"""<!doctype html><html><head><meta charset="utf-8">
   </div>
 
   <div class="ctrls">
-    <div class="ctrl"><label>Threshold (high = drop glare)</label>
-      <input id="threshold" type="range" min="10" max="254" step="1">
+    <div class="ctrl"><label>Threshold % (high = drop glare)</label>
+      <input id="threshold" type="range" min="0" max="100" step="1">
       <span class="v" id="threshold_v"></span></div>
     <div class="ctrl"><label>Contrast</label>
       <input id="contrast" type="range" min="-100" max="100" step="1">
