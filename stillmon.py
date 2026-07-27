@@ -223,8 +223,8 @@ PAGE = """<!doctype html><html><head><meta charset="utf-8">
       step="0.5" style="width:70px"> h <span style="color:#778">(0 = until
       stopped)</span></label>
     <label>Decimals
-      <select id="decimals"><option>0</option><option>1</option>
-        <option>2</option></select></label>
+      <select id="decimals" onchange="setDecimals()"><option>0</option>
+        <option>1</option><option>2</option></select></label>
     <label>Resolution
       <select id="resolution" onchange="setResolution()">__RESOPTIONS__</select>
     </label>
@@ -477,6 +477,16 @@ function setResolution(){
     loadValues();
     el("status").textContent = "crop rescaled — re-check the reading";
     grab();
+  });
+}
+
+// Decimals is applied server-side when the digits are turned into a value, so
+// the change has to reach the service before the readout can reflect it.
+function setDecimals(){
+  post("/settings", {decimals:+el("decimals").value}, function(d){
+    if(d.error){ el("status").textContent = d.error; return; }
+    SETTINGS = d.settings;
+    if(!RUNNING){ refresh(); }      // re-decode the current frame
   });
 }
 
@@ -799,11 +809,22 @@ class Handler(server.BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         svc = self.service
 
+        # Always drain the request body, even on routes that ignore it and on
+        # early returns. Under HTTP/1.1 keep-alive, unread body bytes stay in
+        # the socket and get parsed as the start of the NEXT request on that
+        # connection. That request is then malformed, and the server answers it
+        # with BaseHTTPRequestHandler's HTML error page -- which surfaces in the
+        # browser as "Unexpected token '<', "<!DOCTYPE "... is not valid JSON"
+        # against whatever fetch() happened to be next in line.
+        try:
+            data = self._body()
+        except ValueError:
+            data = {}
+
         if path == "/save_crop":
             if svc.runner.running:
                 self._send(409, "text/plain", "stop logging before re-tuning")
                 return
-            data = self._body()
             crop = svc.merge_crop({k: [str(v)] for k, v in data.items()})
             svc.crop = crop
             saved = config.save_crop(crop)
@@ -814,7 +835,6 @@ class Handler(server.BaseHTTPRequestHandler):
                            saved["top_trim"]))
 
         elif path == "/resolution":
-            data = self._body()
             try:
                 crop = svc.set_resolution(int(data["w"]), int(data["h"]))
             except (KeyError, ValueError, RuntimeError) as exc:
@@ -823,7 +843,6 @@ class Handler(server.BaseHTTPRequestHandler):
             self._json({"crop": crop, "capture": svc.capture_info()})
 
         elif path == "/start":
-            data = self._body()
             try:
                 # persist whatever the user chose, so a restart uses it too
                 svc.settings["interval"] = int(data.get(
@@ -845,7 +864,6 @@ class Handler(server.BaseHTTPRequestHandler):
             self._json(svc.runner.stop())
 
         elif path == "/note":
-            data = self._body()
             try:
                 svc.runner.add_note(data.get("text", ""))
             except (ValueError, RuntimeError) as exc:
@@ -854,7 +872,6 @@ class Handler(server.BaseHTTPRequestHandler):
             self._json(svc.runner.status())
 
         elif path == "/settings":
-            data = self._body()
             merged = dict(svc.settings)
             merged.update(data)
             svc.settings = config.save_settings(merged)
