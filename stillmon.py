@@ -193,7 +193,14 @@ class Service(object):
 # braces don't all have to be doubled. That doubling was a standing bug magnet
 # in the original tuner.
 
-PAGE = """<!doctype html><html><head><meta charset="utf-8">
+# RAW string, deliberately. This is JavaScript and CSS, not Python, so escape
+# sequences in it are meant for the browser. As a normal string Python eats
+# them first: "?\nThis cannot be undone." becomes a real newline inside a JS
+# string literal (an unterminated string), and onclick="f(\'x\')" collapses to
+# onclick="f('x')" which breaks the attribute. Either one is a single
+# SyntaxError that stops the whole script parsing, so every handler vanishes
+# and every button silently does nothing. Keep the r.
+PAGE = r"""<!doctype html><html><head><meta charset="utf-8">
 <title>Still Monitor</title>
 <style>
   body{font-family:system-ui,sans-serif;background:#111;color:#eee;margin:0;

@@ -32,6 +32,33 @@ scp -q "${FILES[@]}" "${PI}:/tmp/"
 ssh -n "$PI" "cd /tmp && python3 -m py_compile ${FILES[*]}"
 echo "    OK"
 
+# The control panel's JS lives inside a Python string, so Python's escape
+# handling can silently corrupt it. One bad escape is a single SyntaxError that
+# stops the whole script parsing -- every button then does nothing, with no
+# server-side symptom at all. There is no JS engine here to parse it properly,
+# so check the two things that actually went wrong.
+echo "==> control panel sanity checks"
+python3 - <<'PY'
+import re, sys
+src = open("stillmon.py").read()
+if 'PAGE = r"""' not in src:
+    sys.exit("    FAIL: PAGE must be a raw string (r\"\"\") -- "
+             "otherwise Python eats \\n and \\' meant for the browser")
+page = re.search(r'PAGE = r"""(.*?)"""', src, re.S).group(1)
+KEYWORDS = {"if", "for", "while", "switch", "return", "typeof", "catch"}
+handlers = set(re.findall(r'\son\w+="(\w+)\(', page)) - KEYWORDS
+defined = set(re.findall(r'function\s+(\w+)\s*\(', page))
+missing = sorted(h for h in handlers if h not in defined)
+if missing:
+    sys.exit("    FAIL: inline handlers with no function: %s" % missing)
+ids = set(re.findall(r'\bid="([\w\-]+)"', page))
+used = set(re.findall(r'el\("([\w\-]+)"\)', page))
+unknown = sorted(u for u in used if u not in ids)
+if unknown:
+    sys.exit("    FAIL: el() references missing elements: %s" % unknown)
+print("    OK: %d handlers, %d element refs" % (len(handlers), len(used)))
+PY
+
 if [[ "$mode" == "--check" ]]; then
   exit 0
 fi
