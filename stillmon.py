@@ -324,9 +324,11 @@ PAGE = r"""<!doctype html><html><head><meta charset="utf-8">
 <div class="tabbar">
   <button id="tab_monitor_btn" class="tabbtn active"
     onclick="showTab('monitor')">Monitor</button>
-  <button id="tab_setup_btn" class="tabbtn"
-    onclick="showTab('setup')">Setup &amp; tuning</button>
-  <span id="setuplocked">locked while logging</span>
+  <button id="tab_tuning_btn" class="tabbtn"
+    onclick="showTab('tuning')">Tuning</button>
+  <button id="tab_settings_btn" class="tabbtn"
+    onclick="showTab('settings')">Settings</button>
+  <span id="setuplocked">tuning locked while logging</span>
 </div>
 
 <div id="alerts"></div>
@@ -386,8 +388,8 @@ PAGE = r"""<!doctype html><html><head><meta charset="utf-8">
 
 </div><!-- end MONITOR -->
 
-<!-- ============================================================== SETUP == -->
-<div id="tab-setup" class="tab">
+<!-- ============================================================= TUNING == -->
+<div id="tab-tuning" class="tab">
 
 <div class="panel">
   <h3 style="margin-top:0">Run setup</h3>
@@ -411,7 +413,7 @@ PAGE = r"""<!doctype html><html><head><meta charset="utf-8">
 <div id="tuner">
   <div class="row" style="margin-bottom:6px">
     <button onclick="grab()">Grab new frame</button>
-    <button onclick="save()">Save settings</button>
+    <button onclick="save()">Save tuning</button>
   </div>
   <div class="views">
     <div class="view"><div class="cap">Camera frame + crop box (live)</div>
@@ -455,34 +457,52 @@ PAGE = r"""<!doctype html><html><head><meta charset="utf-8">
 
 <div class="meta" id="meta"></div>
 
-<!-- ------------------------------------------------------------ settings -->
+</div><!-- end TUNING -->
+
+<!-- =========================================================== SETTINGS == -->
+<div id="tab-settings" class="tab">
+
 <div class="panel">
-    <h3 style="margin-top:0">Quick-note buttons</h3>
-    <div id="btnsettings"></div>
-    <h3>Alerts</h3>
-    <div class="row">
-      <label>Jump warning <input id="alert_delta" type="number" step="0.1"
-        style="width:70px"> °C between readings</label>
-      <label>Misread warning after <input id="alert_misreads" type="number"
-        step="1" style="width:60px"> in a row</label>
-      <label>Rise above plateau <input id="alert_rise" type="number" step="0.1"
-        style="width:60px"> °C</label>
-    </div>
-    <div class="row" style="margin-top:6px">
-      <label>Plateau window <input id="plateau_window" type="number" step="1"
-        style="width:60px"> readings</label>
-      <label>Plateau tolerance <input id="plateau_tolerance" type="number"
-        step="0.1" style="width:60px"> °C</label>
-      <label>Target line <input id="target_temp" type="number" step="0.1"
-        style="width:70px"> °C</label>
-    </div>
-    <div class="row" style="margin-top:10px">
-      <button onclick="saveSettings()">Save settings</button>
-      <span id="settingsstatus" style="color:#8f8;font-size:12px"></span>
-    </div>
+  <h3 style="margin-top:0">Quick-note buttons</h3>
+  <div id="btnsettings"></div>
+
+  <h3>Reading validation</h3>
+  <div class="row">
+    <label>Reject readings changing faster than
+      <input id="max_rate_per_min" type="number" step="1" style="width:70px">
+      °C/min <span style="color:#778">(0 = off)</span></label>
+  </div>
+  <div style="color:#778;font-size:11px;margin-top:4px">
+    A glare-induced misread can be perfectly plausible — a 1 read as a 7 turns
+    16.2 into 76.2, which passes every other check. Physically impossible rates
+    are logged as misreads instead of data.
+  </div>
+
+  <h3>Alerts</h3>
+  <div class="row">
+    <label>Jump warning <input id="alert_delta" type="number" step="0.1"
+      style="width:70px"> °C between readings</label>
+    <label>Misread warning after <input id="alert_misreads" type="number"
+      step="1" style="width:60px"> in a row</label>
+    <label>Rise above plateau <input id="alert_rise" type="number" step="0.1"
+      style="width:60px"> °C</label>
+  </div>
+  <div class="row" style="margin-top:6px">
+    <label>Plateau window <input id="plateau_window" type="number" step="1"
+      style="width:60px"> readings</label>
+    <label>Plateau tolerance <input id="plateau_tolerance" type="number"
+      step="0.1" style="width:60px"> °C</label>
+    <label>Target line <input id="target_temp" type="number" step="0.1"
+      style="width:70px"> °C</label>
+  </div>
+  <div class="row" style="margin-top:10px">
+    <button onclick="saveSettings()">Save settings</button>
+    <span id="settingsstatus" style="color:#8f8;font-size:12px"></span>
+    <span style="color:#778;font-size:11px">these stay editable during a run</span>
+  </div>
 </div>
 
-</div><!-- end SETUP -->
+</div><!-- end SETTINGS -->
 
 <script>
 var CROP = __CROP__;
@@ -497,16 +517,20 @@ function el(id){ return document.getElementById(id); }
 /* ------------------------------------------------------------------ tabs */
 var TAB = "monitor";
 
+var TABS = ["monitor","tuning","settings"];
+
 function showTab(name){
-  // Setup is unavailable during a run: the camera can't tune and log at once,
-  // and resolution/interval changes mid-run would invalidate the data.
-  if(name === "setup" && RUNNING) return;
+  // Tuning is unavailable during a run: the camera can't tune and log at once,
+  // and an interval or resolution change mid-run would invalidate the data.
+  // Settings deliberately stays open -- alert thresholds and note buttons are
+  // exactly the things you want to adjust while watching a run.
+  if(name === "tuning" && RUNNING) return;
   TAB = name;
-  ["monitor","setup"].forEach(function(t){
+  TABS.forEach(function(t){
     el("tab-" + t).className = "tab" + (t === name ? " active" : "");
     el("tab_" + t + "_btn").className = "tabbtn" + (t === name ? " active" : "");
   });
-  if(name === "setup" && !RUNNING){ drawBox(); grab(); }
+  if(name === "tuning" && !RUNNING){ drawBox(); grab(); }
 }
 
 /* ------------------------------------------------------------ formatting */
@@ -696,7 +720,7 @@ function stopRun(){
     el("status").textContent = "";
     applyStatus(d);
     loadRuns();                    // the chart is auto-saved on stop
-    if(TAB === "setup"){ grab(); } // only touch the camera if it's on screen
+    if(TAB === "tuning"){ grab(); } // only touch the camera if it's on screen
   });
 }
 
@@ -776,7 +800,8 @@ function applyStatus(s){
   el("s_elapsed").textContent = s.running ? fmtDuration(s.elapsed) : "--";
   el("s_next").textContent = s.running ? fmtDuration(s.next_in) : "--";
   el("s_misreads").textContent = s.misreads +
-    (s.misread_streak ? (" (" + s.misread_streak + " in a row)") : "");
+    (s.misread_streak ? (" (" + s.misread_streak + " in a row)") : "") +
+    (s.rate_rejects ? (" · " + s.rate_rejects + " rejected") : "");
 
   if(s.running && s.last_value){ el("readout").textContent = s.last_value; }
   if(s.running && s.last_raw){ el("raw").textContent = "raw: " + s.last_raw; }
@@ -786,12 +811,12 @@ function applyStatus(s){
   el("notebtn").disabled = !s.running;
   el("tuner").className = s.running ? "frozen" : "";
 
-  // The whole Setup tab is locked while logging. If the run started while the
-  // user was sitting on that tab, move them off it rather than leaving dead
-  // controls on screen.
-  el("tab_setup_btn").disabled = s.running;
+  // The Tuning tab is locked while logging. If the run started while the user
+  // was sitting on it, move them off rather than leaving dead controls on
+  // screen. Settings stays available throughout.
+  el("tab_tuning_btn").disabled = s.running;
   el("setuplocked").style.display = s.running ? "inline" : "none";
-  if(s.running && TAB === "setup"){ showTab("monitor"); }
+  if(s.running && TAB === "tuning"){ showTab("monitor"); }
 
   el("runplan").textContent = "every " + s.interval + "s" +
     (s.duration_hours > 0 ? (", for " + s.duration_hours + "h")
@@ -902,7 +927,7 @@ function renderSettingsForm(){
   });
 
   ["alert_delta","alert_misreads","alert_rise","plateau_window",
-   "plateau_tolerance","target_temp"].forEach(function(k){
+   "plateau_tolerance","target_temp","max_rate_per_min"].forEach(function(k){
     el(k).value = SETTINGS[k];
   });
   el("interval").value = SETTINGS.interval;
@@ -921,7 +946,7 @@ function saveSettings(){
                  duration_hours: +el("duration").value,
                  decimals: +el("decimals").value};
   ["alert_delta","alert_misreads","alert_rise","plateau_window",
-   "plateau_tolerance","target_temp"].forEach(function(k){
+   "plateau_tolerance","target_temp","max_rate_per_min"].forEach(function(k){
     payload[k] = +el(k).value;
   });
   post("/settings", payload, function(d){

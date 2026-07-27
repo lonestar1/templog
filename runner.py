@@ -75,6 +75,9 @@ class Runner(object):
 
         self.plateau_value = None     # established plateau, degrees
         self.alerts = []              # list of {level, text}
+        self.rate_rejects = 0         # readings dropped by the rate gate
+        self.rate_reject_streak = 0
+        self.last_reject = None       # {"value", "rate"} of the most recent
 
     # ------------------------------------------------------------ lifecycle
 
@@ -176,6 +179,9 @@ class Runner(object):
         self.overruns = 0
         self.plateau_value = None
         self.alerts = []
+        self.rate_rejects = 0
+        self.rate_reject_streak = 0
+        self.last_reject = None
 
     # ----------------------------------------------------------------- csv
 
@@ -296,9 +302,72 @@ class Runner(object):
             self.last_error = "unexpected: {0}".format(exc)
             raw, value = "ERROR", ""
 
+        value = self._rate_gate(value)
         self._record(timestamp, raw, value)
         self._write_row(timestamp, raw, value, note)
         return {"timestamp": timestamp, "raw": raw, "value": value}
+
+    # -- rate gate ---------------------------------------------------------
+
+    RATE_REJECT_LIMIT = 3   # consecutive rejections before we believe the display
+
+    def _rate_gate(self, value):
+        """Blank a reading that changed faster than is physically possible.
+
+        The range gate cannot catch this: glare turning a 1 into a 7 reads 76.2
+        instead of 16.2, and 76.2 is a perfectly ordinary temperature. What
+        gives it away is the RATE -- 120 deg/min, when a boiler manages single
+        digits.
+
+        Rejected readings keep their raw ssocr string and lose only the value,
+        so they appear as misreads in the data rather than vanishing.
+
+        Rejecting cannot be unconditional: if the display genuinely jumps (a
+        sensor swapped, a setpoint changed) a strict gate would reject every
+        subsequent reading forever, since the baseline never moves. After
+        RATE_REJECT_LIMIT consecutive rejections we accept the reading and
+        re-baseline -- a sustained new level is evidence, a single spike isn't.
+        """
+        limit = float(self.service.settings.get("max_rate_per_min", 0) or 0)
+        if not value or limit <= 0 or not self.readings:
+            return value
+
+        last_time, last_value = self.readings[-1]
+        minutes = (time.time() - last_time) / 60.0
+
+        # Never divide by a near-zero gap. A note captures a reading
+        # immediately, which can land milliseconds after a scheduled one --
+        # against a 40ms gap any change at all computes as thousands of
+        # deg/min, and a perfectly good note reading would be thrown away.
+        # The scheduled interval is the meaningful sampling period, so use it
+        # as the floor: a real glare misread still fails the test, an ordinary
+        # note passes it.
+        minutes = max(minutes, self.interval / 60.0)
+        if minutes <= 0:
+            return value
+
+        rate = abs(float(value) - last_value) / minutes
+        if rate <= limit:
+            # a good reading clears the banner; the count in status keeps the
+            # permanent record
+            self.rate_reject_streak = 0
+            self.last_reject = None
+            return value
+
+        self.rate_reject_streak += 1
+        if self.rate_reject_streak > self.RATE_REJECT_LIMIT:
+            # persistent, so it is probably real -- accept and start over
+            print("runner: rate gate accepting {0} after {1} rejections "
+                  "(sustained change)".format(value, self.rate_reject_streak))
+            self.rate_reject_streak = 0
+            self.last_reject = None
+            return value
+
+        self.rate_rejects += 1
+        self.last_reject = {"value": value, "rate": round(rate, 1)}
+        print("runner: rejected {0} -- {1:.0f} deg/min exceeds {2:.0f}".format(
+            value, rate, limit))
+        return ""
 
     def _record(self, timestamp, raw, value):
         self.last_raw = raw
@@ -352,7 +421,16 @@ class Runner(object):
                     "text": "temperature jumped {0:+.1f} deg between readings"
                             .format(delta)})
 
-        # 3. plateau, then a rise -- the process-finished signal
+        # 3. rate gate fired -- the reading was impossible, not just surprising
+        if self.last_reject:
+            alerts.append({
+                "level": "error",
+                "text": "reading {0} rejected: {1:.0f} deg/min is not "
+                        "physically possible -- check for glare".format(
+                            self.last_reject["value"],
+                            self.last_reject["rate"])})
+
+        # 4. plateau, then a rise -- the process-finished signal
         self._update_plateau()
         rise_limit = float(settings.get("alert_rise", 1.0))
         if self.plateau_value is not None and self.readings:
@@ -419,6 +497,7 @@ class Runner(object):
             "count": self.count,
             "misreads": self.misreads,
             "misread_streak": self.misread_streak,
+            "rate_rejects": self.rate_rejects,
             "last_value": self.last_value,
             "last_raw": self.last_raw,
             "last_good_age": (now - self.last_good_at)

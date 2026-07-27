@@ -85,6 +85,11 @@ SETTINGS_DEFAULTS = {
     "num_digits": 3,            # display always shows 3; never use ssocr -d -1
     "temp_min": -40.0,          # range gate: outside this is a misread
     "temp_max": 120.0,
+    # Rate gate. The range gate cannot catch a plausible misread -- glare
+    # turning a 1 into a 7 reads 76.2 instead of 16.2, which is a perfectly
+    # sensible temperature. Nothing physical moves a boiler that fast, so an
+    # impossible RATE is the tell. 0 disables it.
+    "max_rate_per_min": 20.0,
 
     # chart
     "target_temp": 78.3,        # horizontal marker line; 0 = off
@@ -273,7 +278,7 @@ def load_settings():
         if key in saved:
             settings[key] = _coerce_int(saved[key], settings[key])
     for key in ("temp_min", "temp_max", "target_temp", "alert_delta",
-                "alert_rise", "plateau_tolerance"):
+                "alert_rise", "plateau_tolerance", "max_rate_per_min"):
         if key in saved:
             settings[key] = _coerce_float(saved[key], settings[key])
     settings["note_buttons"] = _clean_note_buttons(saved.get("note_buttons"))
@@ -289,6 +294,8 @@ def validate_settings(settings):
     settings["alert_misreads"] = max(1, min(100, settings["alert_misreads"]))
     settings["plateau_window"] = max(3, min(200, settings["plateau_window"]))
     settings["rate_window"] = max(2, min(100, settings["rate_window"]))
+    # negative would reject everything; 0 disables the gate
+    settings["max_rate_per_min"] = max(0.0, float(settings["max_rate_per_min"]))
     # a refresh faster than the capture interval just burns Pi 3 cycles
     settings["refresh_seconds"] = max(5, min(600, settings["refresh_seconds"]))
     if settings["temp_min"] >= settings["temp_max"]:
