@@ -1,0 +1,29 @@
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+
+# Captured / intermediate images — regenerated every run
+frame.jpg
+framing.jpg
+preview.jpg
+crop.png
+testbild.png
+_display.png
+_mid.png
+_proc.png
+_proccrop.png
+
+# Run output — data, not code
+temps_*.csv
+temps_*.html
+
+# Process output
+logger.out
+nohup.out
+
+# Secrets (web UI password, etc.)
+secrets.json
+.env
