@@ -114,10 +114,28 @@ which is installed and running by default). Set a memorable hostname with
 `sudo hostnamectl set-hostname <name>`.
 
 **Point the camera.** Fixed focus, so distance matters more than anything: fill a good part of
-the frame with the digits, keep the sensor square to the display, and control reflections — a
-glare streak across the digit tops is the single most common cause of misreads. Getting the rig
-physically stable matters more than any software setting, because the crop box is tied to where
-the display sits in the frame. Nudge the camera and you re-tune.
+the frame with the digits and keep the sensor square to the display. Getting the rig physically
+stable matters more than any software setting, because the crop box is tied to where the display
+sits in the frame. Nudge the camera and you re-tune.
+
+**Deal with reflections at the display, not in software.** Glare is the single most common cause
+of misreads, and every software fix costs margin somewhere. A reflection landing on an unlit
+segment can make the reading *plausibly wrong* rather than obviously broken — a `1` read as a
+`7` turns 16.2 into 76.2, which passes every validity check there is. Worth trying, roughly in
+order of effort:
+
+- angle the camera a few degrees off the display's normal, so reflections bounce away from the
+  lens rather than into it
+- shade the display, or shield it from whatever light source is reflecting — a simple hood
+  around the camera or above the display does a lot
+- keep bright, glossy or light-coloured surfaces out of the display's line of sight
+- for stubborn reflections, a **polarising filter** over the lens: light reflected off a glossy
+  display cover is partially polarised, so a rotatable polariser can cut it substantially while
+  barely touching the LED output. Fitting one to a Pi Camera Module means a holder in front of
+  the lens rather than a threaded filter, so it's a build rather than a purchase.
+
+Software can only threshold what the sensor gives it. A minute spent moving a lamp is worth more
+than an hour of tuning.
 
 ## Running on newer Raspberry Pi OS
 
