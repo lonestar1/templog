@@ -36,3 +36,6 @@ settings.json
 # Secrets (web UI password, etc.)
 secrets.json
 .env
+
+# Local deploy target (your Pi address) — not for a public repo
+deploy.env

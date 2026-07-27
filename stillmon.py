@@ -7,7 +7,7 @@ tuning, logging, notes and run health in a single control panel.
 
 Run on the Pi:
     python3 stillmon.py
-    # then open http://192.168.113.98:8001/
+    # then open http://<pi-address>:8001/  (or http://<hostname>.local:8001/)
 
 Run on a Mac for UI work (no camera, no ImageMagick, no ssocr needed):
     python3 stillmon.py --sim

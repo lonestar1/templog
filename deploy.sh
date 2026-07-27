@@ -16,7 +16,14 @@
 #
 set -euo pipefail
 
-PI="${STILLMON_PI:-pi@192.168.113.98}"
+# Point this at your own Pi. In order of precedence:
+#   1. STILLMON_PI in the environment
+#   2. a local, gitignored deploy.env  ->  STILLMON_PI=pi@192.168.1.50
+#   3. the mDNS default below
+here_early="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=/dev/null
+[[ -f "$here_early/deploy.env" ]] && source "$here_early/deploy.env"
+PI="${STILLMON_PI:-pi@raspberrypi.local}"
 REMOTE_DIR="Documents/templog"
 FILES=(capture.py chart.py config.py runner.py stillmon.py)
 UNIT=stillmon.service
