@@ -211,9 +211,27 @@ The panel has two tabs. **Monitor** is what you watch during a run; **Setup & tu
 everything you configure beforehand and is locked while logging, because the camera can't tune
 and log at the same time.
 
-**Tune first.** On Setup, grab a frame and drag the crop box over the digits. Raise the
-threshold until only the digits survive — glare is dimmer than the LEDs, so a high cut drops it.
-Use top-trim if a reflection bridges the tops of the digits. Save when the reading is right.
+**Tune first.** On Setup, grab a frame and drag the crop box over the digits. Crop tight — a
+status LED or a `°C` symbol inside the box is read as an extra digit and fails the whole
+reading. Adjust brightness and contrast until the background is black and the digits are clean;
+that pair, not the threshold, is what defeats glare. Save when the reading is right.
+
+**Don't tune for one moment's lighting.** A value that reads correctly right now can sit at the
+edge of the range that works, and fail hours later when the light changes. The threshold that
+survives is the one in the middle of the band, found by sweeping rather than nudging:
+
+```sh
+# on the Pi, against a captured frame, with your saved brightness/contrast
+convert frame.jpg -crop 164x108+428+294 +repage -brightness-contrast -71x67 t.png
+for t in $(seq 0 2 100); do
+  printf "%s %s\n" "$t" "$(ssocr -d 3 -t $t make_mono invert t.png 2>/dev/null)"
+done
+```
+
+Do that with the room lights **on** and again with them **off**, then take the middle of the
+overlap. On this rig that gave 12–76 lit, 14–52 dark, so 33 — a value with roughly 19 points of
+margin in both conditions, where the reading that merely "works" was sitting 8 points from
+failure.
 
 **Then run.** Set interval and duration on Setup (duration 0 = until stopped), switch to
 Monitor, press Start. Add notes as events happen — "first drops", "hearts", "tails" ship as
