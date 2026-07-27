@@ -2,8 +2,9 @@
 """
 stillmon.py -- Still Monitor service.
 
-One always-on web service replacing the separate tuner.py / logger.py scripts:
-tuning, logging, notes and run health in a single control panel.
+One always-on web service: tuning, logging, notes and run health in a single
+control panel. It replaced two separate scripts, tuner.py and logger.py, which
+were removed once superseded -- they remain in git history.
 
 Run on the Pi:
     python3 stillmon.py

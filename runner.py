@@ -2,8 +2,9 @@
 """
 runner.py -- the logging engine.
 
-Replaces logger.py's run loop with one that can be driven from the web UI and
-survives a power cut.
+Replaces the run loop of the original logger.py (removed once superseded; see
+git history) with one that can be driven from the web UI and survives a power
+cut.
 
 Three things differ from the original:
 

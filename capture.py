@@ -2,7 +2,9 @@
 """
 capture.py -- shared camera capture + seven-segment OCR decode.
 
-Extracted from the proven tuner.py / logger.py pipeline. The image path is
+Extracted from the original tuner.py / logger.py scripts, which this service
+replaced and which were removed once superseded -- they are still in git
+history if you want to see where this came from. The image path here is
 byte-faithful to what produced a 216-reading run with zero misreads:
 
     raspistill -o frame.jpg -w W -h H -t 500 -n

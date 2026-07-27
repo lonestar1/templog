@@ -292,6 +292,8 @@ config.py      the three config files, with atomic writes
 deploy.sh      deploy to the Pi, with a Python 3.5 gate and sanity checks
 stillmon.service   systemd unit
 sim/           a real captured frame, used by --sim
-tuner.py       superseded by stillmon.py — kept for reference
-logger.py      superseded by runner.py — kept for reference
 ```
+
+The project began as two standalone scripts, `tuner.py` and `logger.py`, driven over SSH with
+`nohup`. They were removed once the service replaced them; the first commit still has them if
+you want to see the original capture/OCR pipeline in its simplest form.
