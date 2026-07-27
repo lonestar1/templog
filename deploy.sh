@@ -17,7 +17,7 @@ set -euo pipefail
 
 PI="${STILLMON_PI:-pi@192.168.113.98}"
 REMOTE_DIR="Documents/templog"
-FILES=(capture.py config.py runner.py stillmon.py)
+FILES=(capture.py chart.py config.py runner.py stillmon.py)
 UNIT=stillmon.service
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

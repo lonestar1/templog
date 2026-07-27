@@ -31,6 +31,7 @@ import threading
 import time
 
 import capture
+import chart
 import config
 
 
@@ -142,7 +143,24 @@ class Runner(object):
         self.thread = None
         config.clear_run_state()
         self._write_row(_iso(), "", "", "run {0}".format(reason))
+        self.save_chart()
         return self.status()
+
+    def save_chart(self):
+        """Write the run's HTML chart.
+
+        Called on stop and on duration-complete -- the only automatic writes.
+        Everything else renders on the fly and never touches the disk, to keep
+        SD wear down.
+        """
+        if not self.csv_path or not os.path.exists(self.csv_path):
+            return None
+        try:
+            return chart.save_html(self.csv_path, self.service.settings,
+                                   self.plateau_value)
+        except Exception as exc:      # a chart failure must not lose the run
+            print("runner: could not write chart: {0}".format(exc))
+            return None
 
     def _reset_run_state(self):
         self.readings = []
@@ -248,6 +266,7 @@ class Runner(object):
             self.thread = None
             config.clear_run_state()
             self._write_row(_iso(), "", "", "run complete (duration reached)")
+            self.save_chart()
 
     def _next_index(self):
         """Where on the grid we are -- non-zero when resuming."""

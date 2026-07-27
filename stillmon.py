@@ -20,6 +20,8 @@ single-threaded server that blocks every other request and the UI looks dead.
 """
 
 import argparse
+import csv
+import datetime
 import json
 import os
 import socketserver
@@ -30,6 +32,7 @@ from http import server
 from urllib.parse import urlparse, parse_qs
 
 import capture
+import chart
 import config
 import runner
 
@@ -124,6 +127,56 @@ class Service(object):
             return self.pipeline.read(self.crop, self.settings,
                                       build_panels=False)
 
+    # -- run files ---------------------------------------------------------
+
+    def run_path(self, name, extensions=(".csv", ".html")):
+        """Resolve a run filename to a path, refusing anything else.
+
+        These names arrive from the browser, so they get treated as hostile:
+        basename only, a required prefix, and an allowed extension. That rules
+        out traversal and stops the delete endpoint being pointed at, say,
+        crop.json.
+        """
+        base = os.path.basename(name or "")
+        if not base.startswith("temps_") or not base.endswith(extensions):
+            raise ValueError("not a run file: {0}".format(base))
+        return os.path.join(BASE_DIR, base)
+
+    def list_runs(self):
+        """Every run CSV, newest first, with the numbers needed to decide
+        whether to keep it."""
+        runs = []
+        for name in os.listdir(BASE_DIR):
+            if not (name.startswith("temps_") and name.endswith(".csv")):
+                continue
+            path = os.path.join(BASE_DIR, name)
+            try:
+                stat = os.stat(path)
+                readings = 0
+                notes = 0
+                with open(path) as fh:
+                    for row in csv.DictReader(fh):
+                        if (row.get("value") or "").strip():
+                            readings += 1
+                        if (row.get("note") or "").strip():
+                            notes += 1
+            except OSError:
+                continue
+            html = chart.html_path_for(path)
+            runs.append({
+                "csv": name,
+                "readings": readings,
+                "notes": notes,
+                "bytes": stat.st_size,
+                "modified": datetime.datetime.fromtimestamp(
+                    stat.st_mtime).isoformat(),
+                "has_chart": os.path.exists(html),
+                "active": (self.runner.running
+                           and self.runner.csv_path == path),
+            })
+        runs.sort(key=lambda r: r["csv"], reverse=True)
+        return runs
+
     # -- reporting ---------------------------------------------------------
 
     def capture_info(self):
@@ -177,6 +230,18 @@ PAGE = """<!doctype html><html><head><meta charset="utf-8">
      font-variant-numeric:tabular-nums;flex:none;}
   .meta{margin-top:10px;font-size:11px;color:#778;}
 
+  /* tabs: monitoring stays uncluttered, setup lives out of the way */
+  .tabbar{display:flex;gap:2px;align-items:center;margin:10px 0 0;
+          border-bottom:1px solid #333;}
+  .tabbtn{background:#1a1a1a;color:#9ab;border:1px solid #333;
+          border-bottom:none;padding:7px 16px;font-size:13px;
+          border-radius:3px 3px 0 0;margin-bottom:-1px;}
+  .tabbtn.active{background:#111;color:#eee;border-bottom:1px solid #111;}
+  .tabbtn:disabled{opacity:.35;cursor:not-allowed;}
+  #setuplocked{display:none;color:#e8a33d;font-size:11px;margin-left:10px;}
+  .tab{display:none;}
+  .tab.active{display:block;}
+
   /* the tuner is inert while logging -- the camera can't do both */
   #tuner.frozen{opacity:.35;pointer-events:none;filter:grayscale(.6);}
   #frozenmsg{display:none;color:#e8a33d;font-size:12px;margin:6px 0;}
@@ -200,6 +265,15 @@ PAGE = """<!doctype html><html><head><meta charset="utf-8">
   .settingsrow{display:flex;gap:8px;align-items:center;margin:4px 0;}
   .settingsrow input[type=text]{width:150px;}
   details summary{cursor:pointer;color:#9ab;margin-top:14px;}
+  table.runs{border-collapse:collapse;font-size:12px;width:100%;
+             max-width:780px;}
+  table.runs td,table.runs th{text-align:left;padding:4px 10px 4px 0;
+             border-bottom:1px solid #262626;}
+  table.runs th{color:#889;font-size:10px;text-transform:uppercase;
+             letter-spacing:.5px;}
+  table.runs a{color:#8cf;}
+  table.runs .live{color:#6f6;}
+  table.runs button{font-size:11px;padding:2px 8px;}
 </style></head><body>
 
 <div class="top">
@@ -210,24 +284,24 @@ PAGE = """<!doctype html><html><head><meta charset="utf-8">
   __SIMBADGE__
 </div>
 
+<div class="tabbar">
+  <button id="tab_monitor_btn" class="tabbtn active"
+    onclick="showTab('monitor')">Monitor</button>
+  <button id="tab_setup_btn" class="tabbtn"
+    onclick="showTab('setup')">Setup &amp; tuning</button>
+  <span id="setuplocked">locked while logging</span>
+</div>
+
 <div id="alerts"></div>
 
-<!-- ------------------------------------------------------------- logging -->
+<!-- ============================================================ MONITOR == -->
+<div id="tab-monitor" class="tab active">
+
 <div class="panel">
   <div class="row">
     <button id="startbtn" onclick="startRun()">Start logging</button>
     <button id="stopbtn" onclick="stopRun()">Stop</button>
-    <label>Interval <input id="interval" type="number" min="1" max="3600"
-      step="1" style="width:70px"> s</label>
-    <label>Duration <input id="duration" type="number" min="0" max="72"
-      step="0.5" style="width:70px"> h <span style="color:#778">(0 = until
-      stopped)</span></label>
-    <label>Decimals
-      <select id="decimals" onchange="setDecimals()"><option>0</option>
-        <option>1</option><option>2</option></select></label>
-    <label>Resolution
-      <select id="resolution" onchange="setResolution()">__RESOPTIONS__</select>
-    </label>
+    <span id="runplan" style="color:#778;font-size:12px"></span>
   </div>
   <div class="row" style="margin-top:10px" id="stats">
     <div class="stat"><span class="k">state</span>
@@ -261,6 +335,38 @@ PAGE = """<!doctype html><html><head><meta charset="utf-8">
       not at the next interval</span>
   </div>
   <div class="notelist" id="notelist"></div>
+</div>
+
+<!-- --------------------------------------------------------------- runs -->
+<div class="panel">
+  <h3 style="margin-top:0">Runs
+    <button style="margin-left:10px" onclick="viewChart()">View live chart</button>
+    <button onclick="saveChart()">Save chart</button>
+    <span id="chartstatus" style="color:#8f8;font-size:12px"></span>
+  </h3>
+  <table class="runs" id="runs"></table>
+</div>
+
+</div><!-- end MONITOR -->
+
+<!-- ============================================================== SETUP == -->
+<div id="tab-setup" class="tab">
+
+<div class="panel">
+  <h3 style="margin-top:0">Run setup</h3>
+  <div class="row">
+    <label>Interval <input id="interval" type="number" min="1" max="3600"
+      step="1" style="width:70px" onchange="saveRunSetup()"> s</label>
+    <label>Duration <input id="duration" type="number" min="0" max="72"
+      step="0.5" style="width:70px" onchange="saveRunSetup()"> h
+      <span style="color:#778">(0 = until stopped)</span></label>
+    <label>Decimals
+      <select id="decimals" onchange="setDecimals()"><option>0</option>
+        <option>1</option><option>2</option></select></label>
+    <label>Resolution
+      <select id="resolution" onchange="setResolution()">__RESOPTIONS__</select>
+    </label>
+  </div>
 </div>
 
 <!-- --------------------------------------------------------------- tuner -->
@@ -313,9 +419,7 @@ PAGE = """<!doctype html><html><head><meta charset="utf-8">
 <div class="meta" id="meta"></div>
 
 <!-- ------------------------------------------------------------ settings -->
-<details>
-  <summary>Settings — quick-note buttons and alert thresholds</summary>
-  <div class="panel">
+<div class="panel">
     <h3 style="margin-top:0">Quick-note buttons</h3>
     <div id="btnsettings"></div>
     <h3>Alerts</h3>
@@ -339,8 +443,9 @@ PAGE = """<!doctype html><html><head><meta charset="utf-8">
       <button onclick="saveSettings()">Save settings</button>
       <span id="settingsstatus" style="color:#8f8;font-size:12px"></span>
     </div>
-  </div>
-</details>
+</div>
+
+</div><!-- end SETUP -->
 
 <script>
 var CROP = __CROP__;
@@ -351,6 +456,21 @@ var IDS = ["threshold","contrast","brightness","top_trim","x","y","w","h"];
 var RUNNING = false;
 
 function el(id){ return document.getElementById(id); }
+
+/* ------------------------------------------------------------------ tabs */
+var TAB = "monitor";
+
+function showTab(name){
+  // Setup is unavailable during a run: the camera can't tune and log at once,
+  // and resolution/interval changes mid-run would invalidate the data.
+  if(name === "setup" && RUNNING) return;
+  TAB = name;
+  ["monitor","setup"].forEach(function(t){
+    el("tab-" + t).className = "tab" + (t === name ? " active" : "");
+    el("tab_" + t + "_btn").className = "tabbtn" + (t === name ? " active" : "");
+  });
+  if(name === "setup" && !RUNNING){ drawBox(); grab(); }
+}
 
 /* ------------------------------------------------------------ formatting */
 function fmtDuration(seconds){
@@ -480,6 +600,19 @@ function setResolution(){
   });
 }
 
+// Interval and duration live on the Setup tab but are used by Start on the
+// Monitor tab, so they persist on change rather than at Start.
+function saveRunSetup(){
+  post("/settings", {interval:+el("interval").value,
+                     duration_hours:+el("duration").value}, function(d){
+    if(d.error){ el("settingsstatus").textContent = d.error; return; }
+    SETTINGS = d.settings;
+    el("interval").value = SETTINGS.interval;
+    el("duration").value = SETTINGS.duration_hours;
+    poll();                          // refresh the plan line on Monitor
+  });
+}
+
 // Decimals is applied server-side when the digits are turned into a value, so
 // the change has to reach the service before the readout can reflect it.
 function setDecimals(){
@@ -516,6 +649,7 @@ function startRun(){
     if(d.error){ el("status").textContent = d.error; return; }
     el("status").textContent = "";
     applyStatus(d);
+    loadRuns();
   });
 }
 
@@ -524,7 +658,8 @@ function stopRun(){
   post("/stop", {}, function(d){
     el("status").textContent = "";
     applyStatus(d);
-    grab();                        // wake the tuner back up
+    loadRuns();                    // the chart is auto-saved on stop
+    if(TAB === "setup"){ grab(); } // only touch the camera if it's on screen
   });
 }
 
@@ -612,11 +747,18 @@ function applyStatus(s){
   el("startbtn").disabled = s.running;
   el("stopbtn").disabled = !s.running;
   el("notebtn").disabled = !s.running;
-  el("resolution").disabled = s.running;
-  el("interval").disabled = s.running;
-  el("duration").disabled = s.running;
-  el("decimals").disabled = s.running;
   el("tuner").className = s.running ? "frozen" : "";
+
+  // The whole Setup tab is locked while logging. If the run started while the
+  // user was sitting on that tab, move them off it rather than leaving dead
+  // controls on screen.
+  el("tab_setup_btn").disabled = s.running;
+  el("setuplocked").style.display = s.running ? "inline" : "none";
+  if(s.running && TAB === "setup"){ showTab("monitor"); }
+
+  el("runplan").textContent = "every " + s.interval + "s" +
+    (s.duration_hours > 0 ? (", for " + s.duration_hours + "h")
+                          : ", until stopped");
 
   renderAlerts(s.alerts);
   renderNotes(s.notes);
@@ -627,6 +769,64 @@ function poll(){
   fetch("/status").then(function(r){ return r.json(); })
     .then(applyStatus)
     .catch(function(){ /* transient; the next poll will catch up */ });
+}
+
+/* ----------------------------------------------------------------- runs */
+function viewChart(file){
+  var url = "/chart" + (file ? ("?file=" + encodeURIComponent(file)) : "");
+  window.open(url, "_blank");
+}
+
+function saveChart(file){
+  el("chartstatus").textContent = "saving…";
+  post("/save_chart", file ? {file:file} : {}, function(d){
+    el("chartstatus").textContent = d.error ? d.error : ("saved " + d.saved);
+    loadRuns();
+    setTimeout(function(){ el("chartstatus").textContent = ""; }, 4000);
+  });
+}
+
+function deleteRun(file){
+  if(!confirm("Delete " + file + " and its chart?\nThis cannot be undone."))
+    return;
+  post("/delete_run", {file:file}, function(d){
+    if(d.error){ el("chartstatus").textContent = d.error; return; }
+    renderRuns(d.runs);
+  });
+}
+
+function renderRuns(runs){
+  var host = el("runs");
+  if(!runs || !runs.length){
+    host.innerHTML = '<tr><td style="color:#778">no runs yet</td></tr>';
+    return;
+  }
+  var html = "<tr><th>run</th><th>readings</th><th>notes</th><th>size</th>" +
+             "<th>chart</th><th></th></tr>";
+  runs.forEach(function(r){
+    var kb = (r.bytes/1024).toFixed(1) + " kB";
+    html += "<tr>" +
+      "<td>" + r.csv + (r.active ? ' <span class="live">● logging</span>' : "") + "</td>" +
+      "<td>" + r.readings + "</td>" +
+      "<td>" + r.notes + "</td>" +
+      "<td>" + kb + "</td>" +
+      "<td>" + (r.has_chart
+        ? '<a href="/download?file=' + encodeURIComponent(r.csv.replace(/\.csv$/, ".html")) + '">saved</a>'
+        : '<span style="color:#778">—</span>') + "</td>" +
+      '<td><button onclick="viewChart(\'' + r.csv + '\')">chart</button> ' +
+      '<button onclick="saveChart(\'' + r.csv + '\')">save</button> ' +
+      '<a href="/download?file=' + encodeURIComponent(r.csv) + '">csv</a> ' +
+      (r.active ? "" :
+        '<button onclick="deleteRun(\'' + r.csv + '\')">delete</button>') +
+      "</td></tr>";
+  });
+  host.innerHTML = html;
+}
+
+function loadRuns(){
+  fetch("/runs").then(function(r){ return r.json(); })
+    .then(function(d){ renderRuns(d.runs); })
+    .catch(function(){ /* transient */ });
 }
 
 /* -------------------------------------------------------------- settings */
@@ -685,10 +885,13 @@ renderNoteButtons();
 showMeta();
 drawBox();
 poll();
+loadRuns();
 setInterval(poll, POLL_MS);
-fetch("/status").then(function(r){ return r.json(); }).then(function(s){
-  if(!s.running){ grab(); }        // only touch the camera when it's free
-});
+// The runs list re-reads every CSV to count readings, so it refreshes on the
+// slower settings.refresh_seconds cadence rather than with the status poll.
+setInterval(loadRuns, Math.max(15, SETTINGS.refresh_seconds) * 1000);
+// No frame is grabbed at load: the page opens on Monitor, and the camera is
+// only worth waking when the Setup tab is actually shown.
 </script>
 </body></html>"""
 
@@ -796,6 +999,52 @@ class Handler(server.BaseHTTPRequestHandler):
                         "capture": svc.capture_info(),
                         "resolutions": [list(r) for r in config.RESOLUTIONS]})
 
+        elif path == "/runs":
+            self._json({"runs": svc.list_runs()})
+
+        elif path == "/chart":
+            # Rendered on the fly and never written to disk -- the live view
+            # can be opened as often as you like without touching the SD card.
+            name = (query.get("file") or [None])[0]
+            try:
+                target = (svc.run_path(name, (".csv",)) if name
+                          else svc.runner.csv_path)
+            except ValueError as exc:
+                self._send(400, "text/plain", str(exc))
+                return
+            if not target or not os.path.exists(target):
+                self._send(404, "text/html; charset=utf-8",
+                           "<p>No run to chart yet.</p>")
+                return
+            plateau = (svc.runner.plateau_value
+                       if target == svc.runner.csv_path else None)
+            run = chart.load_run(target)
+            self._send(200, "text/html; charset=utf-8",
+                       chart.render_html(run, svc.settings, plateau))
+
+        elif path == "/download":
+            name = (query.get("file") or [None])[0]
+            try:
+                target = svc.run_path(name)
+            except ValueError as exc:
+                self._send(400, "text/plain", str(exc))
+                return
+            if not os.path.exists(target):
+                self._send(404, "text/plain", "not found")
+                return
+            ctype = ("text/csv" if target.endswith(".csv")
+                     else "text/html; charset=utf-8")
+            with open(target, "rb") as fh:
+                body = fh.read()
+            self.send_response(200)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Content-Disposition",
+                             'attachment; filename="{0}"'.format(
+                                 os.path.basename(target)))
+            self.end_headers()
+            self.wfile.write(body)
+
         elif path == "/disp.png":
             self._file(svc.pipeline.disp_img, "image/png")
         elif path == "/mid.png":
@@ -876,6 +1125,46 @@ class Handler(server.BaseHTTPRequestHandler):
             merged.update(data)
             svc.settings = config.save_settings(merged)
             self._json({"settings": svc.settings})
+
+        elif path == "/save_chart":
+            name = data.get("file")
+            try:
+                target = (svc.run_path(name, (".csv",)) if name
+                          else svc.runner.csv_path)
+            except ValueError as exc:
+                self._json({"error": str(exc)}, code=400)
+                return
+            if not target or not os.path.exists(target):
+                self._json({"error": "no run to chart"}, code=404)
+                return
+            plateau = (svc.runner.plateau_value
+                       if target == svc.runner.csv_path else None)
+            try:
+                written = chart.save_html(target, svc.settings, plateau)
+            except OSError as exc:
+                self._json({"error": str(exc)}, code=500)
+                return
+            self._json({"saved": os.path.basename(written)})
+
+        elif path == "/delete_run":
+            try:
+                target = svc.run_path(data.get("file"), (".csv",))
+            except ValueError as exc:
+                self._json({"error": str(exc)}, code=400)
+                return
+            if svc.runner.running and svc.runner.csv_path == target:
+                self._json({"error": "that run is still logging"}, code=409)
+                return
+            removed = []
+            for candidate in (target, chart.html_path_for(target)):
+                if os.path.exists(candidate):
+                    try:
+                        os.unlink(candidate)
+                        removed.append(os.path.basename(candidate))
+                    except OSError as exc:
+                        self._json({"error": str(exc)}, code=500)
+                        return
+            self._json({"deleted": removed, "runs": svc.list_runs()})
 
         else:
             self._send(404, "text/plain", "not found")
