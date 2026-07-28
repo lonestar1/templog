@@ -136,11 +136,18 @@ def render_svg(run, settings=None, plateau=None):
 
     target = float(settings.get("target_temp", 0) or 0)
     low, high = min(values), max(values)
-    # keep the target line and the plateau inside the visible range
-    for extra in (target if target else None, plateau):
-        if extra is not None:
-            low = min(low, extra)
-            high = max(high, extra)
+
+    # The data sets the scale. Forcing the target line into range wrecks the
+    # chart whenever the two are far apart: an ambient run at 16 C with a
+    # target of 78.3 produced an axis of -20..80, drawing the readings as a
+    # flat line squashed into the bottom few percent. The target line appears
+    # once the readings approach it, and the caption says so meanwhile.
+    #
+    # The plateau IS included, because it is derived from the readings and so
+    # is always near them.
+    if plateau is not None:
+        low = min(low, plateau)
+        high = max(high, plateau)
     axis_low, axis_high, step = _nice_y_axis(low, high)
     axis_span = axis_high - axis_low
 
@@ -259,6 +266,11 @@ def render_svg(run, settings=None, plateau=None):
     caption = ("{0} readings  ·  {1:.1f}–{2:.1f} °C  ·  "
                "{3:.0f} min").format(len(points), min(values), max(values),
                                      duration)
+    # say where the target is when it is off the chart, so its absence from
+    # the plot never reads as "no target set"
+    if target and not (axis_low <= target <= axis_high):
+        caption += "  ·  target {0:.1f} °C {1} this range".format(
+            target, "above" if target > axis_high else "below")
     out.append('<text x="{0}" y="{1}" font-size="11" fill="{2}">{3}</text>'
                .format(MARGIN_LEFT, HEIGHT - 8, TEXT_COLOUR, caption))
     out.append('<text x="{0}" y="{1}" text-anchor="end" font-size="11" '
