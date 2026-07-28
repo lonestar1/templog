@@ -19,6 +19,7 @@ Legacy-Python 3.5 compatible.
 
 import csv
 import datetime
+import math
 import os
 
 
@@ -102,8 +103,11 @@ def _nice_y_axis(low, high):
         if candidate >= raw_step:
             step = candidate
             break
-    axis_low = step * (int(low / step) - (1 if low % step else 0))
-    axis_high = step * (int(high / step) + (1 if high % step else 0))
+    # floor/ceil, not int(). int() truncates towards zero, so a minimum of
+    # 16.1 with a step of 20 gave int(0.8) - 1 = -1, an axis starting at -20
+    # on a chart that never goes below 16 -- a quarter of the height wasted.
+    axis_low = step * math.floor(low / step)
+    axis_high = step * math.ceil(high / step)
     if axis_high <= axis_low:
         axis_high = axis_low + step
     return axis_low, axis_high, step
