@@ -80,7 +80,35 @@ class Service(object):
                     merged[key] = int(float(params[key][0]))
                 except (ValueError, IndexError):
                     pass
+        if "invert" in params:
+            # arrives as a query string ("0"/"1") or a JSON bool
+            raw = params["invert"][0]
+            merged["invert"] = str(raw).lower() not in ("0", "false", "")
         return merged
+
+    def apply_preset(self, name):
+        """Load a named tuning preset and make it current.
+
+        Presets can come from a different capture resolution, so the crop box
+        is rescaled rather than landing in the wrong part of the frame.
+        """
+        if self.runner.running:
+            raise RuntimeError("stop logging before switching preset")
+        presets = config.load_presets()
+        if name not in presets:
+            raise ValueError("no preset named {0}".format(name))
+        entry = dict(presets[name])
+        crop = dict(config.CROP_DEFAULTS)
+        for key in config.CROP_INT_KEYS:
+            if key in entry:
+                crop[key] = int(entry[key])
+        for key in config.CROP_BOOL_KEYS:
+            if key in entry:
+                crop[key] = bool(entry[key])
+        crop = config.rescale_crop(crop, self.crop["cap_w"], self.crop["cap_h"])
+        with self.camera_lock:
+            self.crop = config.save_crop(crop)
+        return self.crop
 
     def set_resolution(self, width, height):
         """Switch capture resolution, carrying the tuning across.
@@ -414,6 +442,16 @@ PAGE = r"""<!doctype html><html><head><meta charset="utf-8">
   <div class="row" style="margin-bottom:6px">
     <button onclick="grab()">Grab new frame</button>
     <button onclick="save()">Save tuning</button>
+    <label title="ssocr wants dark digits on a light background">
+      <input id="invert" type="checkbox" onchange="setInvert()">
+      Invert <span style="color:#778">(on = LED, off = LCD)</span></label>
+  </div>
+  <div class="row" style="margin-bottom:8px">
+    <label>Preset <select id="presetsel"></select></label>
+    <button onclick="loadPreset()">Load</button>
+    <button onclick="savePreset()">Save as…</button>
+    <button onclick="deletePreset()">Delete</button>
+    <span id="presetstatus" style="color:#8f8;font-size:12px"></span>
   </div>
   <div class="views">
     <div class="view"><div class="cap">Camera frame + crop box (live)</div>
@@ -558,6 +596,7 @@ function loadValues(){
     el(id).value = CROP[id];
     el(id + "_v").textContent = CROP[id];
   });
+  el("invert").checked = (CROP.invert !== false);
 }
 
 IDS.forEach(function(id){
@@ -572,6 +611,7 @@ IDS.forEach(function(id){
 function params(){
   var p = {};
   IDS.forEach(function(id){ p[id] = el(id).value; });
+  p.invert = el("invert").checked ? 1 : 0;
   return p;
 }
 function qs(){
@@ -681,6 +721,75 @@ function setDecimals(){
     if(d.error){ el("status").textContent = d.error; return; }
     SETTINGS = d.settings;
     if(!RUNNING){ refresh(); }      // re-decode the current frame
+  });
+}
+
+// Invert is part of the tuning, so it re-decodes the current frame straight
+// away rather than waiting for a save -- an LCD goes from garbage to a reading
+// the moment it is switched off.
+function setInvert(){
+  CROP.invert = el("invert").checked;
+  refresh();
+}
+
+/* --------------------------------------------------------------- presets */
+function renderPresets(names){
+  var sel = el("presetsel");
+  sel.innerHTML = "";
+  if(!names || !names.length){
+    var o = document.createElement("option");
+    o.textContent = "(none saved)";
+    o.value = "";
+    sel.appendChild(o);
+    return;
+  }
+  names.forEach(function(n){
+    var o = document.createElement("option");
+    o.textContent = n; o.value = n;
+    sel.appendChild(o);
+  });
+}
+
+function loadPresets(){
+  fetch("/presets").then(function(r){ return r.json(); })
+    .then(function(d){ renderPresets(d.presets); })
+    .catch(function(){ /* transient */ });
+}
+
+function savePreset(){
+  var name = prompt("Save this tuning as:", "");
+  if(!name) return;
+  var body = params();
+  body.name = name;
+  body.invert = el("invert").checked;
+  post("/preset_save", body, function(d){
+    if(d.error){ el("presetstatus").textContent = d.error; return; }
+    renderPresets(d.presets);
+    el("presetsel").value = name;
+    el("presetstatus").textContent = "saved " + name;
+    setTimeout(function(){ el("presetstatus").textContent = ""; }, 3000);
+  });
+}
+
+function loadPreset(){
+  var name = el("presetsel").value;
+  if(!name) return;
+  post("/preset_load", {name:name}, function(d){
+    if(d.error){ el("presetstatus").textContent = d.error; return; }
+    CROP = d.crop;
+    loadValues();
+    el("presetstatus").textContent = "loaded " + name;
+    grab();
+  });
+}
+
+function deletePreset(){
+  var name = el("presetsel").value;
+  if(!name) return;
+  if(!confirm("Delete preset " + name + "?")) return;
+  post("/preset_delete", {name:name}, function(d){
+    renderPresets(d.presets);
+    el("presetstatus").textContent = "deleted " + name;
   });
 }
 
@@ -967,6 +1076,7 @@ showMeta();
 drawBox();
 poll();
 loadRuns();
+loadPresets();
 setInterval(poll, POLL_MS);
 // The runs list re-reads every CSV to count readings, so it refreshes on the
 // slower settings.refresh_seconds cadence rather than with the status poll.
@@ -1082,6 +1192,10 @@ class Handler(server.BaseHTTPRequestHandler):
 
         elif path == "/runs":
             self._json({"runs": svc.list_runs()})
+
+        elif path == "/presets":
+            self._json({"presets": sorted(config.load_presets().keys()),
+                        "crop": svc.crop})
 
         elif path == "/chart":
             # Rendered on the fly and never written to disk -- the live view
@@ -1247,6 +1361,30 @@ class Handler(server.BaseHTTPRequestHandler):
             merged.update(data)
             svc.settings = config.save_settings(merged)
             self._json({"settings": svc.settings})
+
+        elif path == "/preset_save":
+            try:
+                presets = config.save_preset(data.get("name"),
+                                             svc.merge_crop(
+                                                 {k: [str(v)] for k, v
+                                                  in data.items()
+                                                  if k != "name"}))
+            except ValueError as exc:
+                self._json({"error": str(exc)}, code=400)
+                return
+            self._json({"presets": sorted(presets.keys())})
+
+        elif path == "/preset_load":
+            try:
+                crop = svc.apply_preset(data.get("name"))
+            except (ValueError, RuntimeError) as exc:
+                self._json({"error": str(exc)}, code=409)
+                return
+            self._json({"crop": crop, "capture": svc.capture_info()})
+
+        elif path == "/preset_delete":
+            presets = config.delete_preset(data.get("name"))
+            self._json({"presets": sorted(presets.keys())})
 
         elif path == "/save_chart":
             name = data.get("file")

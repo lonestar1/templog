@@ -12,10 +12,17 @@ byte-faithful to what produced a 216-reading run with zero misreads:
     ssocr -d 3 -t THR make_mono invert crop.png
 
 Do not "improve" those invocations without re-validating on the Pi. In
-particular: `invert` is required (the display is bright-on-dark, ssocr wants
-dark-on-light), `-d 3` must stay fixed (auto-count invents phantom 1s from
-noise), and the decimal point is inserted by us -- ssocr's dot detection is
-unreliable on this multiplexed display.
+particular: `-d 3` must stay fixed (auto-count invents phantom 1s from noise),
+and the decimal point is inserted by us -- ssocr's dot detection is unreliable
+on a multiplexed display.
+
+`invert` depends on the display technology, and gets it exactly backwards if
+you guess. ssocr wants dark digits on a light background:
+
+    LED (emissive)  bright digits on dark  -> invert
+    LCD (passive)   dark digits on light   -> do NOT invert
+
+Measured on a TP300 LCD: it decodes only with invert off, never with it on.
 
 Legacy-Python 3.5 compatible: no f-strings, no subprocess capture_output.
 """
@@ -150,10 +157,12 @@ class PiBackend(object):
         except (OSError, subprocess.CalledProcessError) as exc:
             raise CaptureError("resize failed: {0}".format(exc))
 
-    def ssocr(self, src, threshold, num_digits=3, debug_image=None):
+    def ssocr(self, src, threshold, num_digits=3, debug_image=None,
+              invert=True):
         """Decode digits. Returns (raw_string, stderr_string).
 
-        `invert` is required and `-d N` must stay fixed -- see module docstring.
+        `invert` is on for an LED display and off for an LCD; `-d N` must stay
+        fixed. See the module docstring.
 
         `threshold` is a PERCENTAGE, 0-100. ssocr rejects anything outside that
         and silently uses its own default of 50, which makes an out-of-range
@@ -163,7 +172,10 @@ class PiBackend(object):
         cmd = ["ssocr", "-d", str(int(num_digits)), "-t", str(int(threshold))]
         if debug_image:
             cmd += ["-D", "-o", debug_image]
-        cmd += ["make_mono", "invert", src]
+        cmd += ["make_mono"]
+        if invert:
+            cmd += ["invert"]
+        cmd += [src]
         try:
             out = subprocess.run(cmd,
                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -221,7 +233,8 @@ class SimBackend(object):
     def resize(self, src, dest, width=640):
         shutil.copyfile(src, dest)
 
-    def ssocr(self, src, threshold, num_digits=3, debug_image=None):
+    def ssocr(self, src, threshold, num_digits=3, debug_image=None,
+              invert=True):
         if debug_image:
             shutil.copyfile(src, debug_image)
         self.reading_count += 1
@@ -305,8 +318,9 @@ class Pipeline(object):
 
         debug_image = self._testbild if build_panels else None
         raw, err = self.backend.ssocr(
-            self._proc_crop, int(crop.get("threshold", 130)),
-            num_digits=num_digits, debug_image=debug_image)
+            self._proc_crop, int(crop.get("threshold", 50)),
+            num_digits=num_digits, debug_image=debug_image,
+            invert=bool(crop.get("invert", True)))
 
         if build_panels:
             self._build_panels()

@@ -39,3 +39,6 @@ secrets.json
 
 # Local deploy target (your Pi address) — not for a public repo
 deploy.env
+
+# Per-machine tuning presets
+presets.json

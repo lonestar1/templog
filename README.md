@@ -234,6 +234,29 @@ status LED or a `°C` symbol inside the box is read as an extra digit and fails 
 reading. Adjust brightness and contrast until the background is black and the digits are clean;
 that pair, not the threshold, is what defeats glare. Save when the reading is right.
 
+**LED or LCD?** The **Invert** switch on the tuning row has to match the display technology, and
+gets it exactly backwards if you guess. `ssocr` wants dark digits on a light background:
+
+| Display | Looks like | Invert |
+|---|---|---|
+| LED, emissive (a lit thermostat readout) | bright digits on black | **on** |
+| LCD, passive (a probe thermometer) | dark digits on grey | **off** |
+
+An LCD is not lit from within — it modulates whatever light falls on it. That reverses two habits
+from the LED case: it needs the display face **well lit** rather than shaded, and it has a narrow
+viewing cone, so a few degrees off-axis washes the digits out to flat grey. If the camera sees a
+featureless grey rectangle, change the angle before changing any setting.
+
+Expect an LCD to be fussier. Measured on the same rig, an LED decoded correctly across ~20
+threshold values while an LCD managed 2–3, because grey-on-grey has far less contrast than
+red-on-black.
+
+**Presets.** Tuning is saved per display under a name — *Save as…* on the tuning row, then
+*Load* to switch. A preset stores the crop box, threshold, brightness, contrast, top-trim,
+capture resolution and the invert flag, so swapping between an LED thermostat and an LCD probe
+is one click rather than a full re-tune. Presets live in `presets.json` (gitignored, per-machine)
+and are rescaled if loaded at a different capture resolution.
+
 **Don't tune for one moment's lighting.** A value that reads correctly right now can sit at the
 edge of the range that works, and fail hours later when the light changes. The threshold that
 survives is the one in the middle of the band, found by sweeping rather than nudging:

@@ -31,6 +31,7 @@ CROP_PATH = os.path.join(BASE_DIR, "crop.json")
 SETTINGS_PATH = os.path.join(BASE_DIR, "settings.json")
 SECRETS_PATH = os.path.join(BASE_DIR, "secrets.json")
 RUN_STATE_PATH = os.path.join(BASE_DIR, "run_state.json")
+PRESETS_PATH = os.path.join(BASE_DIR, "presets.json")
 
 
 # Capture resolution presets. Crop coordinates live in this space, so changing
@@ -59,10 +60,17 @@ CROP_DEFAULTS = {
     "contrast": 0,        # -100..100, applied in software
     "cap_w": 820,         # the resolution the coords above belong to
     "cap_h": 616,
+    "invert": True,       # True for an emissive LED display, False for an LCD
 }
 
 CROP_INT_KEYS = ("x", "y", "w", "h", "top_trim",
                  "threshold", "brightness", "contrast", "cap_w", "cap_h")
+
+# ssocr wants dark digits on a light background.
+#   LED  (emissive)  = bright digits on dark  -> invert
+#   LCD  (passive)   = dark digits on light   -> do NOT invert
+# Measured on a TP300 LCD: it decodes only with invert off, never with it on.
+CROP_BOOL_KEYS = ("invert",)
 
 # Starting presets for the six quick-note buttons. Every field is editable in
 # the settings page -- these are only what ships.
@@ -167,6 +175,9 @@ def load_crop():
         for key in CROP_INT_KEYS:
             if key in saved:
                 crop[key] = _coerce_int(saved[key], crop[key])
+        for key in CROP_BOOL_KEYS:
+            if key in saved:
+                crop[key] = bool(saved[key])
     return normalise_threshold(crop)
 
 
@@ -198,6 +209,8 @@ def save_crop(crop):
     payload = {}
     for key in CROP_INT_KEYS:
         payload[key] = _coerce_int(crop.get(key), CROP_DEFAULTS[key])
+    for key in CROP_BOOL_KEYS:
+        payload[key] = bool(crop.get(key, CROP_DEFAULTS[key]))
     normalise_threshold(payload)
     geometry, _ = effective_crop(payload)
     payload["geometry"] = geometry
@@ -341,3 +354,42 @@ def save_secrets(secrets):
         os.chmod(SECRETS_PATH, 0o600)
     except OSError:
         pass
+
+
+# ------------------------------------------------------------------ presets
+
+def load_presets():
+    """Named tuning presets, so one rig can serve several displays.
+
+    An LED thermostat and an LCD thermometer need different crops, different
+    brightness AND opposite invert settings -- retuning from scratch each time
+    you swap is the thing this avoids.
+    """
+    data = _read_json(PRESETS_PATH) or {}
+    presets = data.get("presets") if isinstance(data, dict) else None
+    return presets if isinstance(presets, dict) else {}
+
+
+def save_preset(name, crop):
+    """Store the current tuning under a name. Overwrites silently by design --
+    re-saving a preset after nudging it is the common case."""
+    name = (name or "").strip()[:40]
+    if not name:
+        raise ValueError("preset needs a name")
+    presets = load_presets()
+    entry = {}
+    for key in CROP_INT_KEYS:
+        entry[key] = _coerce_int(crop.get(key), CROP_DEFAULTS[key])
+    for key in CROP_BOOL_KEYS:
+        entry[key] = bool(crop.get(key, CROP_DEFAULTS[key]))
+    entry["saved"] = datetime.datetime.now().isoformat()
+    presets[name] = entry
+    _atomic_write_json(PRESETS_PATH, {"presets": presets})
+    return presets
+
+
+def delete_preset(name):
+    presets = load_presets()
+    presets.pop(name, None)
+    _atomic_write_json(PRESETS_PATH, {"presets": presets})
+    return presets
