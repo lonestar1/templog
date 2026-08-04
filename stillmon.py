@@ -157,6 +157,61 @@ class Service(object):
             return self.pipeline.read(self.crop, self.settings,
                                       build_panels=False)
 
+    # -- samples -----------------------------------------------------------
+
+    def mark_sample(self):
+        """Record that a sample was drawn NOW; the readings follow later.
+
+        The run's CSV is captured at marking time, so a sample drawn at 14:00
+        still lands in the right file even if it is only measured at 14:40,
+        after the run has ended.
+        """
+        if not self.runner.csv_path:
+            raise RuntimeError("start a run before marking samples")
+        pending = config.load_pending_samples()
+        entry = {
+            "id": datetime.datetime.now().isoformat(),
+            "time": datetime.datetime.now().isoformat(),
+            "csv": os.path.basename(self.runner.csv_path),
+        }
+        pending.append(entry)
+        config.save_pending_samples(pending)
+        return pending
+
+    def log_sample(self, sample_id, sample_temp="", sample_abv="", note=""):
+        """Fill in a marked sample and write it at its ORIGINAL timestamp."""
+        pending = config.load_pending_samples()
+        match = None
+        for entry in pending:
+            if entry.get("id") == sample_id:
+                match = entry
+                break
+        if match is None:
+            raise ValueError("no pending sample with that id")
+        if sample_temp == "" and sample_abv == "" and not note:
+            raise ValueError("enter a temperature, an ABV, or a note")
+
+        path = self.run_path(match.get("csv"), (".csv",))
+        if not os.path.exists(path):
+            raise ValueError("the run file for that sample is gone")
+
+        logged = runner.log_sample(path, match["time"], sample_temp,
+                                   sample_abv, note)
+        pending = [e for e in pending if e.get("id") != sample_id]
+        config.save_pending_samples(pending)
+
+        # if that run is still the live one, show it in the notes list now
+        if self.runner.running and self.runner.csv_path == path:
+            self.runner.notes.append({"time": logged["time"], "value": "",
+                                      "text": logged["text"]})
+        return {"pending": pending, "logged": logged}
+
+    def cancel_sample(self, sample_id):
+        pending = [e for e in config.load_pending_samples()
+                   if e.get("id") != sample_id]
+        config.save_pending_samples(pending)
+        return pending
+
     # -- run files ---------------------------------------------------------
 
     def run_path(self, name, extensions=(".csv", ".html")):
@@ -402,6 +457,17 @@ PAGE = r"""<!doctype html><html><head><meta charset="utf-8">
       not at the next interval</span>
   </div>
   <div class="notelist" id="notelist"></div>
+</div>
+
+<!-- ------------------------------------------------------------- samples -->
+<div class="panel">
+  <h3 style="margin-top:0">Samples</h3>
+  <div class="row">
+    <button id="samplebtn" onclick="markSample()">Sample drawn now</button>
+    <span style="color:#778;font-size:11px">marks the time; fill in the
+      readings once it has cooled and it is logged at the marked time</span>
+  </div>
+  <div id="pendingsamples"></div>
 </div>
 
 <!-- --------------------------------------------------------------- runs -->
@@ -863,6 +929,76 @@ function renderNoteButtons(){
   }
 }
 
+/* --------------------------------------------------------------- samples */
+// A sample's readings arrive long after the moment they describe, so the time
+// is captured on drawing and the row is written against it later.
+function markSample(){
+  post("/sample_mark", {}, function(d){
+    if(d.error){ el("status").textContent = d.error; return; }
+    renderPending(d.pending_samples);
+  });
+}
+
+function logSample(id){
+  post("/sample_log", {id:id,
+                       sample_temp: el("st_" + cssId(id)).value,
+                       sample_abv:  el("sa_" + cssId(id)).value,
+                       note:        el("sn_" + cssId(id)).value},
+    function(d){
+      if(d.error){ el("status").textContent = d.error; return; }
+      el("status").textContent = "logged at " + d.logged.time.substr(11, 8);
+      renderPending(d.pending_samples);
+      poll();
+    });
+}
+
+function cancelSample(id){
+  if(!confirm("Discard this marked sample?")) return;
+  post("/sample_cancel", {id:id}, function(d){
+    renderPending(d.pending_samples);
+  });
+}
+
+// ISO timestamps contain characters that are awkward in element ids
+function cssId(id){ return id.replace(/[^a-zA-Z0-9]/g, ""); }
+
+function renderPending(pending){
+  var host = el("pendingsamples");
+  host.innerHTML = "";
+  if(!pending || !pending.length){
+    host.innerHTML = '<div style="color:#778;font-size:11px;margin-top:6px">' +
+      'no samples waiting</div>';
+    return;
+  }
+  pending.forEach(function(s){
+    var key = cssId(s.id);
+    var age = Math.round((Date.now() - new Date(s.time).getTime()) / 60000);
+    var row = document.createElement("div");
+    row.className = "row";
+    row.style.marginTop = "8px";
+    row.innerHTML =
+      '<span style="color:#8cf;font-variant-numeric:tabular-nums">' +
+        s.time.substr(11, 8) + '</span>' +
+      '<span style="color:#778;font-size:11px">' + age + ' min ago</span>' +
+      '<label>temp <input id="st_' + key + '" type="number" step="0.1" ' +
+        'style="width:70px"> °C</label>' +
+      '<label>ABV <input id="sa_' + key + '" type="number" step="0.1" ' +
+        'style="width:70px"> %</label>' +
+      '<input id="sn_' + key + '" type="text" placeholder="note (optional)" ' +
+        'style="width:170px">' +
+      '<button id="sb_' + key + '">Log</button>' +
+      '<button id="sc_' + key + '">Discard</button>';
+    host.appendChild(row);
+    el("sb_" + key).addEventListener("click", function(){ logSample(s.id); });
+    el("sc_" + key).addEventListener("click", function(){ cancelSample(s.id); });
+    ["st_", "sa_", "sn_"].forEach(function(prefix){
+      el(prefix + key).addEventListener("keydown", function(e){
+        if(e.key === "Enter"){ logSample(s.id); }
+      });
+    });
+  });
+}
+
 function renderNotes(notes){
   var host = el("notelist");
   host.innerHTML = "";
@@ -934,6 +1070,11 @@ function applyStatus(s){
   renderAlerts(s.alerts);
   renderNotes(s.notes);
   renderNoteButtons();
+  // marking needs a run (it has to know which file the sample belongs to),
+  // but FILLING IN a marked sample stays available afterwards -- the cooling
+  // delay routinely outlasts the run
+  el("samplebtn").disabled = !s.running;
+  renderPending(s.pending_samples);
 }
 
 function poll(){
@@ -1164,6 +1305,7 @@ class Handler(server.BaseHTTPRequestHandler):
         elif path == "/status":
             status = svc.runner.status()
             status["capture"] = svc.capture_info()
+            status["pending_samples"] = config.load_pending_samples()
             self._json(status)
 
         elif path == "/grab":
@@ -1361,6 +1503,31 @@ class Handler(server.BaseHTTPRequestHandler):
             merged.update(data)
             svc.settings = config.save_settings(merged)
             self._json({"settings": svc.settings})
+
+        elif path == "/sample_mark":
+            try:
+                pending = svc.mark_sample()
+            except RuntimeError as exc:
+                self._json({"error": str(exc)}, code=409)
+                return
+            self._json({"pending_samples": pending})
+
+        elif path == "/sample_log":
+            try:
+                result = svc.log_sample(
+                    data.get("id"),
+                    str(data.get("sample_temp", "")).strip(),
+                    str(data.get("sample_abv", "")).strip(),
+                    str(data.get("note", "")).strip())
+            except ValueError as exc:
+                self._json({"error": str(exc)}, code=400)
+                return
+            self._json({"pending_samples": result["pending"],
+                        "logged": result["logged"]})
+
+        elif path == "/sample_cancel":
+            self._json({"pending_samples":
+                        svc.cancel_sample(data.get("id"))})
 
         elif path == "/preset_save":
             try:

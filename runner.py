@@ -36,7 +36,49 @@ import chart
 import config
 
 
-CSV_HEADER = ["timestamp", "raw", "value", "note"]
+# sample_temp / sample_abv describe a COLLECTED SAMPLE, not the boiler. They
+# are deliberately not written to `value`: `value` is the boiler curve, and a
+# cooled sample sitting at 20 C would put a meaningless spike in it.
+CSV_HEADER = ["timestamp", "raw", "value", "note", "sample_temp", "sample_abv"]
+
+# Runs started before samples existed have a 4-column header. Appending
+# 6-column rows to those would produce a ragged file, so every append matches
+# whatever header the file actually has.
+_HEADER_CACHE = {}
+_APPEND_LOCK = threading.Lock()
+
+
+def header_of(path):
+    """The column names an existing CSV was created with."""
+    cached = _HEADER_CACHE.get(path)
+    if cached:
+        return cached
+    header = list(CSV_HEADER)
+    try:
+        if os.path.exists(path) and os.path.getsize(path) > 0:
+            with open(path) as fh:
+                first = csv.reader(fh).__next__()
+            if first:
+                header = [c.strip() for c in first]
+    except (OSError, StopIteration, ValueError):
+        pass
+    _HEADER_CACHE[path] = header
+    return header
+
+
+def append_row(path, fields):
+    """Append a row to a run CSV, matching its existing columns.
+
+    `fields` is a dict keyed by column name. Columns the file does not have are
+    dropped; columns it has that aren't supplied are written empty.
+    """
+    header = header_of(path)
+    row = [fields.get(name, "") for name in header]
+    with _APPEND_LOCK:
+        with open(path, "a", newline="") as fh:
+            csv.writer(fh).writerow(row)
+            fh.flush()
+    return header
 
 
 def _now():
@@ -198,10 +240,8 @@ class Runner(object):
     def _write_row(self, timestamp, raw, value, note=""):
         """The only frequent disk write in the whole service. Explicitly
         flushed -- the CSV is the source of truth, console output is not."""
-        with self.csv_lock:
-            with open(self.csv_path, "a", newline="") as fh:
-                csv.writer(fh).writerow([timestamp, raw, value, note])
-                fh.flush()
+        append_row(self.csv_path, {"timestamp": timestamp, "raw": raw,
+                                   "value": value, "note": note})
 
     def _load_existing(self, path):
         """Rebuild in-memory state from a CSV we're resuming into."""
@@ -515,6 +555,34 @@ class Runner(object):
             "alerts": self.alerts,
             "notes": self.notes[-20:],
         }
+
+
+def log_sample(csv_path, timestamp, sample_temp="", sample_abv="", note=""):
+    """Write a collected-sample row at the time it was DRAWN, not now.
+
+    A distillate sample has to cool before a hydrometer reading means anything,
+    so the numbers arrive long after the moment they describe. Writing them at
+    the current time would put every sample in the wrong place on the chart.
+
+    The row lands out of chronological order in the file, which is harmless:
+    the boiler curve is built only from rows with a `value`, and sample rows
+    have none. Markers are positioned by their timestamp, not by file order.
+    """
+    parts = []
+    if sample_temp != "":
+        parts.append("{0} C".format(sample_temp))
+    if sample_abv != "":
+        parts.append("{0}% ABV".format(sample_abv))
+    summary = "sample: " + ", ".join(parts) if parts else "sample"
+    if note:
+        summary += " -- " + note
+
+    append_row(csv_path, {"timestamp": timestamp, "raw": "", "value": "",
+                          "note": summary,
+                          "sample_temp": sample_temp,
+                          "sample_abv": sample_abv})
+    return {"time": timestamp, "text": summary,
+            "sample_temp": sample_temp, "sample_abv": sample_abv}
 
 
 def first_timestamp(csv_path):

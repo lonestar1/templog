@@ -135,7 +135,14 @@ def render_svg(run, settings=None, plateau=None):
 
     times = [p[0] for p in points]
     values = [p[1] for p in points]
-    t0, t1 = times[0], times[-1]
+
+    # The time axis has to cover the notes as well as the readings. A sample is
+    # marked when it is drawn, which can be a moment before the first reading
+    # or after the last -- and anything outside the range is not merely
+    # mispositioned, it is dropped entirely and silently.
+    note_times = [n["time"] for n in run["notes"] if n.get("time")]
+    t0 = min([times[0]] + note_times)
+    t1 = max([times[-1]] + note_times)
     span_seconds = (t1 - t0).total_seconds() or 1.0
 
     target = float(settings.get("target_temp", 0) or 0)

@@ -32,6 +32,7 @@ SETTINGS_PATH = os.path.join(BASE_DIR, "settings.json")
 SECRETS_PATH = os.path.join(BASE_DIR, "secrets.json")
 RUN_STATE_PATH = os.path.join(BASE_DIR, "run_state.json")
 PRESETS_PATH = os.path.join(BASE_DIR, "presets.json")
+PENDING_SAMPLES_PATH = os.path.join(BASE_DIR, "pending_samples.json")
 
 
 # Capture resolution presets. Crop coordinates live in this space, so changing
@@ -393,3 +394,21 @@ def delete_preset(name):
     presets.pop(name, None)
     _atomic_write_json(PRESETS_PATH, {"presets": presets})
     return presets
+
+
+# --------------------------------------------------------- pending samples
+
+def load_pending_samples():
+    """Samples whose time has been marked but whose readings haven't arrived.
+
+    Persisted rather than held in memory: a sample can sit cooling for twenty
+    minutes, which is long enough for a service restart, a browser reload, or a
+    switch from laptop to phone. Losing the marked time would defeat the point.
+    """
+    data = _read_json(PENDING_SAMPLES_PATH) or {}
+    pending = data.get("pending") if isinstance(data, dict) else None
+    return pending if isinstance(pending, list) else []
+
+
+def save_pending_samples(pending):
+    _atomic_write_json(PENDING_SAMPLES_PATH, {"pending": pending})
