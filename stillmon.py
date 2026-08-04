@@ -962,41 +962,94 @@ function cancelSample(id){
 // ISO timestamps contain characters that are awkward in element ids
 function cssId(id){ return id.replace(/[^a-zA-Z0-9]/g, ""); }
 
+var PENDING_KEY = null;          // which samples are currently on screen
+var SAMPLE_FIELDS = ["st_", "sa_", "sn_"];
+
+function ageText(iso){
+  var mins = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+  return (mins < 1 ? "just now" : mins + " min ago");
+}
+
+// The status poll runs every 10s, and rebuilding this list on every poll wiped
+// whatever was half-typed into the fields -- you would enter a temperature,
+// reach for the ABV, and watch it clear. The list is therefore only rebuilt
+// when the set of pending samples actually changes; otherwise just the ages
+// are refreshed, and the inputs are never touched.
 function renderPending(pending){
   var host = el("pendingsamples");
+  pending = pending || [];
+  var key = pending.map(function(s){ return s.id; }).join("|");
+
+  if(key === PENDING_KEY){
+    pending.forEach(function(s){
+      var age = el("sage_" + cssId(s.id));
+      if(age){ age.textContent = ageText(s.time); }
+    });
+    return;
+  }
+
+  // A rebuild is genuinely needed (one was added, logged or discarded). Carry
+  // across anything already typed for the samples that survive it, and the
+  // cursor with it -- a sample marked on the phone would otherwise interrupt
+  // someone typing on the laptop.
+  var kept = {};
+  var active = document.activeElement;
+  var activeId = (active && active.id) ? active.id : null;
+  var caret = null;
+  if(activeId && active.type === "text"){
+    try { caret = [active.selectionStart, active.selectionEnd]; } catch(e){}
+  }
+  pending.forEach(function(s){
+    var k = cssId(s.id);
+    SAMPLE_FIELDS.forEach(function(p){
+      var field = el(p + k);
+      if(field){ kept[p + k] = field.value; }
+    });
+  });
+
+  PENDING_KEY = key;
   host.innerHTML = "";
-  if(!pending || !pending.length){
+  if(!pending.length){
     host.innerHTML = '<div style="color:#778;font-size:11px;margin-top:6px">' +
       'no samples waiting</div>';
     return;
   }
+
   pending.forEach(function(s){
-    var key = cssId(s.id);
-    var age = Math.round((Date.now() - new Date(s.time).getTime()) / 60000);
+    var k = cssId(s.id);
     var row = document.createElement("div");
     row.className = "row";
     row.style.marginTop = "8px";
     row.innerHTML =
       '<span style="color:#8cf;font-variant-numeric:tabular-nums">' +
         s.time.substr(11, 8) + '</span>' +
-      '<span style="color:#778;font-size:11px">' + age + ' min ago</span>' +
-      '<label>temp <input id="st_' + key + '" type="number" step="0.1" ' +
+      '<span id="sage_' + k + '" style="color:#778;font-size:11px">' +
+        ageText(s.time) + '</span>' +
+      '<label>temp <input id="st_' + k + '" type="number" step="0.1" ' +
         'style="width:70px"> °C</label>' +
-      '<label>ABV <input id="sa_' + key + '" type="number" step="0.1" ' +
+      '<label>ABV <input id="sa_' + k + '" type="number" step="0.1" ' +
         'style="width:70px"> %</label>' +
-      '<input id="sn_' + key + '" type="text" placeholder="note (optional)" ' +
+      '<input id="sn_' + k + '" type="text" placeholder="note (optional)" ' +
         'style="width:170px">' +
-      '<button id="sb_' + key + '">Log</button>' +
-      '<button id="sc_' + key + '">Discard</button>';
+      '<button id="sb_' + k + '">Log</button>' +
+      '<button id="sc_' + k + '">Discard</button>';
     host.appendChild(row);
-    el("sb_" + key).addEventListener("click", function(){ logSample(s.id); });
-    el("sc_" + key).addEventListener("click", function(){ cancelSample(s.id); });
-    ["st_", "sa_", "sn_"].forEach(function(prefix){
-      el(prefix + key).addEventListener("keydown", function(e){
+    SAMPLE_FIELDS.forEach(function(p){
+      if(kept[p + k] !== undefined){ el(p + k).value = kept[p + k]; }
+      el(p + k).addEventListener("keydown", function(e){
         if(e.key === "Enter"){ logSample(s.id); }
       });
     });
+    el("sb_" + k).addEventListener("click", function(){ logSample(s.id); });
+    el("sc_" + k).addEventListener("click", function(){ cancelSample(s.id); });
   });
+
+  if(activeId && el(activeId)){
+    el(activeId).focus();
+    if(caret){
+      try { el(activeId).setSelectionRange(caret[0], caret[1]); } catch(e){}
+    }
+  }
 }
 
 function renderNotes(notes){
