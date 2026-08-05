@@ -120,6 +120,7 @@ class Runner(object):
         self.rate_rejects = 0         # readings dropped by the rate gate
         self.rate_reject_streak = 0
         self.last_reject = None       # {"value", "rate"} of the most recent
+        self.seen_ramp = False        # has the temperature actually climbed?
 
     # ------------------------------------------------------------ lifecycle
 
@@ -224,6 +225,7 @@ class Runner(object):
         self.rate_rejects = 0
         self.rate_reject_streak = 0
         self.last_reject = None
+        self.seen_ramp = False
 
     # ----------------------------------------------------------------- csv
 
@@ -487,12 +489,35 @@ class Runner(object):
     def _update_plateau(self):
         """Call a plateau once a window of readings sits inside a tolerance.
 
-        Once established it is kept, because the whole point is to detect the
-        later rise away from it.
+        A PLATEAU ONLY COUNTS IF A RAMP CAME FIRST. Without that, the first
+        flat stretch of any run is the ambient temperature before the heat is
+        even on -- it is flat for as long as you like, gets locked in, and then
+        an ordinary heat-up ramp clears the rise threshold and reports the
+        process as finished at 24 C. Worse, the real plateau is then never
+        detected, so the signal that actually matters is lost for the whole
+        run.
+
+        Requiring a preceding ramp encodes what the plateau means: the process
+        settling after heating, not the room it started in.
         """
-        if self.plateau_value is not None:
-            return
         settings = self.service.settings
+        rate = self.rate_per_minute()
+        ramp_rate = float(settings.get("plateau_ramp_rate", 0.5))
+        if rate is not None and abs(rate) >= ramp_rate:
+            self.seen_ramp = True
+
+        if self.plateau_value is not None:
+            # A plateau left far behind was never the plateau -- it was a
+            # shoulder in the ramp. Discard it and keep looking, rather than
+            # measuring the rest of the run against a wrong baseline.
+            margin = max(3.0 * float(settings.get("alert_rise", 1.0)), 3.0)
+            if self.readings and self.readings[-1][1] - self.plateau_value >= margin:
+                self.plateau_value = None
+            return
+
+        if not self.seen_ramp:
+            return
+
         window = int(settings.get("plateau_window", 10))
         tolerance = float(settings.get("plateau_tolerance", 0.3))
         if len(self.readings) < window:
@@ -557,7 +582,8 @@ class Runner(object):
         }
 
 
-def log_sample(csv_path, timestamp, sample_temp="", sample_abv="", note=""):
+def log_sample(csv_path, timestamp, sample_temp="", sample_abv="", note="",
+               still_raw="", still_value=""):
     """Write a collected-sample row at the time it was DRAWN, not now.
 
     A distillate sample has to cool before a hydrometer reading means anything,
@@ -573,15 +599,23 @@ def log_sample(csv_path, timestamp, sample_temp="", sample_abv="", note=""):
         parts.append("{0} C".format(sample_temp))
     if sample_abv != "":
         parts.append("{0}% ABV".format(sample_abv))
-    summary = "sample: " + ", ".join(parts) if parts else "sample"
+    # `still_value` is the boiler at the moment the sample was drawn -- named
+    # explicitly, because the row now carries two temperatures and confusing
+    # them would make the record useless.
+    head = "sample" if not still_value else "sample (still {0} C)".format(
+        still_value)
+    summary = head + ": " + ", ".join(parts) if parts else head
     if note:
         summary += " -- " + note
 
-    append_row(csv_path, {"timestamp": timestamp, "raw": "", "value": "",
+    # The boiler reading goes in raw/value, so the sample also appears as an
+    # ordinary point on the temperature curve rather than a gap in it.
+    append_row(csv_path, {"timestamp": timestamp,
+                          "raw": still_raw, "value": still_value,
                           "note": summary,
                           "sample_temp": sample_temp,
                           "sample_abv": sample_abv})
-    return {"time": timestamp, "text": summary,
+    return {"time": timestamp, "text": summary, "still_value": still_value,
             "sample_temp": sample_temp, "sample_abv": sample_abv}
 
 

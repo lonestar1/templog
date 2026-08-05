@@ -168,11 +168,27 @@ class Service(object):
         """
         if not self.runner.csv_path:
             raise RuntimeError("start a run before marking samples")
+
+        # Capture what the STILL is doing at the moment the sample is drawn.
+        # Reading it later would be wrong -- by then the sample has cooled and
+        # the boiler has moved on. This is the number that makes a sample
+        # meaningful: 95% ABV off a 78 C plateau means something different from
+        # 95% off a boiler at 92 C.
+        still_raw, still_value = "", ""
+        try:
+            reading = self.capture_reading()
+            still_raw, still_value = reading["raw"], reading["value"]
+        except Exception as exc:          # never lose the mark over a misread
+            print("stillmon: could not read the still while marking a "
+                  "sample: {0}".format(exc))
+
         pending = config.load_pending_samples()
         entry = {
             "id": datetime.datetime.now().isoformat(),
             "time": datetime.datetime.now().isoformat(),
             "csv": os.path.basename(self.runner.csv_path),
+            "still_raw": still_raw,
+            "still_value": still_value,
         }
         pending.append(entry)
         config.save_pending_samples(pending)
@@ -196,7 +212,9 @@ class Service(object):
             raise ValueError("the run file for that sample is gone")
 
         logged = runner.log_sample(path, match["time"], sample_temp,
-                                   sample_abv, note)
+                                   sample_abv, note,
+                                   still_raw=match.get("still_raw", ""),
+                                   still_value=match.get("still_value", ""))
         pending = [e for e in pending if e.get("id") != sample_id]
         config.save_pending_samples(pending)
 
@@ -1025,6 +1043,8 @@ function renderPending(pending){
         s.time.substr(11, 8) + '</span>' +
       '<span id="sage_' + k + '" style="color:#778;font-size:11px">' +
         ageText(s.time) + '</span>' +
+      '<span style="color:#6f6;font-size:11px">still ' +
+        (s.still_value ? s.still_value + " °C" : "?") + '</span>' +
       '<label>temp <input id="st_' + k + '" type="number" step="0.1" ' +
         'style="width:70px"> °C</label>' +
       '<label>ABV <input id="sa_' + k + '" type="number" step="0.1" ' +

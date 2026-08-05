@@ -109,6 +109,10 @@ SETTINGS_DEFAULTS = {
     "alert_rise": 1.0,          # rise above a plateau = process finished
     "plateau_window": 10,       # readings that must be flat to call a plateau
     "plateau_tolerance": 0.3,   # max spread across that window, degrees
+    # A plateau only counts once the temperature has actually climbed at this
+    # rate. Without it the ambient temperature before heating gets locked in as
+    # "the plateau" and every run reports itself finished during warm-up.
+    "plateau_ramp_rate": 0.5,   # deg/min that counts as heating
 
     # ui
     "refresh_seconds": 60,      # control panel auto-refresh while logging
@@ -292,7 +296,8 @@ def load_settings():
         if key in saved:
             settings[key] = _coerce_int(saved[key], settings[key])
     for key in ("temp_min", "temp_max", "target_temp", "alert_delta",
-                "alert_rise", "plateau_tolerance", "max_rate_per_min"):
+                "alert_rise", "plateau_tolerance", "max_rate_per_min",
+                "plateau_ramp_rate"):
         if key in saved:
             settings[key] = _coerce_float(saved[key], settings[key])
     settings["note_buttons"] = _clean_note_buttons(saved.get("note_buttons"))
