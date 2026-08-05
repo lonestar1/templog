@@ -92,6 +92,32 @@ def load_run(path):
             "name": os.path.basename(path)}
 
 
+# Markers the service writes about itself, rather than about the process.
+SYSTEM_NOTES = ("run stopped", "logging resumed",
+                "service restarted -- logging resumed",
+                "run complete (duration reached)")
+
+
+def filter_notes(run, show_system=False):
+    """Drop the service's own markers, and renumber what is left.
+
+    Renumbering matters: the numbers are shared by both charts and the table,
+    so filtering without renumbering leaves visible gaps (1, 2, 4, 5) that look
+    like missing notes.
+    """
+    if show_system:
+        return run
+    notes = [n for n in run["notes"]
+             if (n.get("text") or "").strip() not in SYSTEM_NOTES]
+    for position, note in enumerate(notes, start=1):
+        note = dict(note)
+        note["index"] = position
+        notes[position - 1] = note
+    trimmed = dict(run)
+    trimmed["notes"] = notes
+    return trimmed
+
+
 def _nice_y_axis(low, high):
     """Pick a readable y range and tick step.
 
@@ -379,9 +405,11 @@ __NOTES__
 </body></html>"""
 
 
-def render_html(run, settings=None, plateau=None, generated=None):
+def render_html(run, settings=None, plateau=None, generated=None,
+                show_system=False):
     """Self-contained HTML: inline SVG, notes listed below, no external files."""
     settings = settings or {}
+    run = filter_notes(run, show_system)
     svg = render_svg(run, settings, plateau)
     points = run["points"]
 
@@ -442,10 +470,10 @@ def html_path_for(csv_path):
     return base + ".html"
 
 
-def save_html(csv_path, settings=None, plateau=None):
+def save_html(csv_path, settings=None, plateau=None, show_system=False):
     """Write the chart next to its CSV. Deliberate, occasional writes only."""
     run = load_run(csv_path)
-    html = render_html(run, settings, plateau)
+    html = render_html(run, settings, plateau, show_system=show_system)
     path = html_path_for(csv_path)
     with open(path, "w") as fh:
         fh.write(html)

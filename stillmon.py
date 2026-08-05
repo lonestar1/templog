@@ -225,7 +225,11 @@ class Service(object):
 
         # if that run is still the live one, show it in the notes list now
         if self.runner.running and self.runner.csv_path == path:
-            self.runner.notes.append({"time": logged["time"], "value": "",
+            # the still reading, not blank -- the CSV has it, so the panel
+            # showing "--" while the chart shows a temperature is just this
+            # list disagreeing with the file
+            self.runner.notes.append({"time": logged["time"],
+                                      "value": logged.get("still_value", ""),
                                       "text": logged["text"]})
         return {"pending": pending, "logged": logged}
 
@@ -500,6 +504,8 @@ PAGE = r"""<!doctype html><html><head><meta charset="utf-8">
   <h3 style="margin-top:0">Runs
     <button style="margin-left:10px" onclick="viewChart()">View live chart</button>
     <button onclick="saveChart()">Save chart</button>
+    <label style="font-size:12px;color:#bbb;font-weight:normal">
+      <input id="showsystem" type="checkbox"> include service markers</label>
     <span id="chartstatus" style="color:#8f8;font-size:12px"></span>
   </h3>
   <div class="runswrap"><table class="runs" id="runs"></table></div>
@@ -1215,13 +1221,20 @@ function poll(){
 
 /* ----------------------------------------------------------------- runs */
 function viewChart(file){
-  var url = "/chart" + (file ? ("?file=" + encodeURIComponent(file)) : "");
-  window.open(url, "_blank");
+  // Stop/resume and restart markers are a record of interruptions, not of the
+  // process. Off by default; the checkbox brings them back when you are
+  // debugging rather than reading the run.
+  var q = [];
+  if(file){ q.push("file=" + encodeURIComponent(file)); }
+  if(el("showsystem").checked){ q.push("system=1"); }
+  window.open("/chart" + (q.length ? ("?" + q.join("&")) : ""), "_blank");
 }
 
 function saveChart(file){
   el("chartstatus").textContent = "saving…";
-  post("/save_chart", file ? {file:file} : {}, function(d){
+  var body = file ? {file: file} : {};
+  body.system = el("showsystem").checked;
+  post("/save_chart", body, function(d){
     el("chartstatus").textContent = d.error ? d.error : ("saved " + d.saved);
     loadRuns();
     setTimeout(function(){ el("chartstatus").textContent = ""; }, 4000);
@@ -1487,8 +1500,10 @@ class Handler(server.BaseHTTPRequestHandler):
             plateau = (svc.runner.plateau_value
                        if target == svc.runner.csv_path else None)
             run = chart.load_run(target)
+            show_system = (query.get("system") or ["0"])[0] not in ("0", "")
             self._send(200, "text/html; charset=utf-8",
-                       chart.render_html(run, svc.settings, plateau))
+                       chart.render_html(run, svc.settings, plateau,
+                                         show_system=show_system))
 
         elif path == "/download":
             name = (query.get("file") or [None])[0]
@@ -1699,7 +1714,8 @@ class Handler(server.BaseHTTPRequestHandler):
             plateau = (svc.runner.plateau_value
                        if target == svc.runner.csv_path else None)
             try:
-                written = chart.save_html(target, svc.settings, plateau)
+                written = chart.save_html(target, svc.settings, plateau,
+                                          show_system=bool(data.get("system")))
             except OSError as exc:
                 self._json({"error": str(exc)}, code=500)
                 return
