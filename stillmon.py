@@ -169,11 +169,13 @@ class Service(object):
         if not self.runner.csv_path:
             raise RuntimeError("start a run before marking samples")
 
-        # Capture what the STILL is doing at the moment the sample is drawn.
-        # Reading it later would be wrong -- by then the sample has cooled and
-        # the boiler has moved on. This is the number that makes a sample
-        # meaningful: 95% ABV off a 78 C plateau means something different from
-        # 95% off a boiler at 92 C.
+        # Capture the still temperature -- the vapour temperature at the probe,
+        # which is what the camera reads -- at the moment the sample is drawn.
+        # NOT the wash/boiler temperature, which is a different measurement and
+        # is recorded by hand in notes. Reading it later would be wrong: by then
+        # the sample has cooled and the still has moved on. This is the number
+        # that gives a sample meaning, since 95% ABV off a 78 C plateau is a
+        # different thing from 95% off a still running at 92 C.
         still_raw, still_value = "", ""
         try:
             reading = self.capture_reading()

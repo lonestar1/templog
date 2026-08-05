@@ -36,9 +36,15 @@ import chart
 import config
 
 
-# sample_temp / sample_abv describe a COLLECTED SAMPLE, not the boiler. They
-# are deliberately not written to `value`: `value` is the boiler curve, and a
-# cooled sample sitting at 20 C would put a meaningless spike in it.
+# Three different temperatures meet in this file, so be precise about them:
+#   value        the STILL temperature -- the vapour temperature at the probe,
+#                which is what the camera reads. This is the curve.
+#   sample_temp  the temperature of a COLLECTED SAMPLE when measured, used to
+#                correct its hydrometer reading. Nothing to do with the curve.
+#   (the wash/boiler temperature is a third thing again, recorded by hand in
+#    notes, and never read by this software)
+# sample_temp is deliberately kept out of `value`: a cooled sample sitting at
+# 20 C would put a meaningless spike in the curve.
 CSV_HEADER = ["timestamp", "raw", "value", "note", "sample_temp", "sample_abv"]
 
 # Runs started before samples existed have a 4-column header. Appending
@@ -358,7 +364,7 @@ class Runner(object):
 
         The range gate cannot catch this: glare turning a 1 into a 7 reads 76.2
         instead of 16.2, and 76.2 is a perfectly ordinary temperature. What
-        gives it away is the RATE -- 120 deg/min, when a boiler manages single
+        gives it away is the RATE -- 120 deg/min, when a still manages single
         digits.
 
         Rejected readings keep their raw ssocr string and lose only the value,
@@ -591,7 +597,7 @@ def log_sample(csv_path, timestamp, sample_temp="", sample_abv="", note="",
     the current time would put every sample in the wrong place on the chart.
 
     The row lands out of chronological order in the file, which is harmless:
-    the boiler curve is built only from rows with a `value`, and sample rows
+    the still curve is built only from rows with a `value`, and sample rows
     have none. Markers are positioned by their timestamp, not by file order.
     """
     parts = []
@@ -599,7 +605,8 @@ def log_sample(csv_path, timestamp, sample_temp="", sample_abv="", note="",
         parts.append("{0} C".format(sample_temp))
     if sample_abv != "":
         parts.append("{0}% ABV".format(sample_abv))
-    # `still_value` is the boiler at the moment the sample was drawn -- named
+    # `still_value` is the still temperature -- the vapour temperature the
+    # camera reads -- at the moment the sample was drawn. Named explicitly
     # explicitly, because the row now carries two temperatures and confusing
     # them would make the record useless.
     head = "sample" if not still_value else "sample (still {0} C)".format(
@@ -608,7 +615,7 @@ def log_sample(csv_path, timestamp, sample_temp="", sample_abv="", note="",
     if note:
         summary += " -- " + note
 
-    # The boiler reading goes in raw/value, so the sample also appears as an
+    # The still reading goes in raw/value, so the sample also appears as an
     # ordinary point on the temperature curve rather than a gap in it.
     append_row(csv_path, {"timestamp": timestamp,
                           "raw": still_raw, "value": still_value,

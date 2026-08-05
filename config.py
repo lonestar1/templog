@@ -96,7 +96,7 @@ SETTINGS_DEFAULTS = {
     "temp_max": 120.0,
     # Rate gate. The range gate cannot catch a plausible misread -- glare
     # turning a 1 into a 7 reads 76.2 instead of 16.2, which is a perfectly
-    # sensible temperature. Nothing physical moves a boiler that fast, so an
+    # sensible temperature. Nothing physical moves a still that fast, so an
     # impossible RATE is the tell. 0 disables it.
     "max_rate_per_min": 20.0,
 

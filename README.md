@@ -3,7 +3,7 @@
 Reads the temperature off a 7-segment LED thermostat display **optically** — a Raspberry Pi
 camera points at the readout, the image is cropped and thresholded, and
 [`ssocr`](https://github.com/auerswal/ssocr) decodes the digits. Readings are logged to a
-timestamped CSV and served through a browser control panel, for monitoring a still boiler run
+timestamped CSV and served through a browser control panel, for monitoring a distillation run
 over several hours.
 
 The display can't be tapped electrically, hence the camera. It turns out to be a perfectly good
