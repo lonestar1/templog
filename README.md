@@ -282,6 +282,24 @@ one-tap buttons and every button is editable, including what text it writes to t
 chart live at any time, save it to disk, download the CSV, resume a run that was stopped too
 early, or delete it. The chart is auto-saved once when a run stops.
 
+## Samples
+
+A distillate sample has to cool before a hydrometer reading means anything, so the numbers
+arrive long after the moment they describe. **Sample drawn now** records the time and the
+still temperature at that instant; the sample then waits in a pending list until you fill in
+volume, temperature and ABV, and the row is written against the **original** timestamp so it
+lands in the right place on the chart.
+
+The ABV is temperature-corrected automatically into `sample_abv_corrected`, using a linear
+rule — subtract `abv_correction_per_c` (default 0.30) for every degree above
+`abv_reference_temp` (default 20 °C). Both are editable in Settings.
+
+That rule is an approximation. The real correction is non-linear and depends on ABV as well
+as temperature; proper tables exist (OIML R 22, or TTB Gauging Manual Table 1 for proof).
+The default was calibrated against hand corrections at 30–33 °C and 85–95% ABV, so trust it
+near there and less so far outside. To find your own coefficient, measure a sample at
+working temperature, cool it to 20 °C, measure again, and divide the difference by the gap.
+
 ## Configuration
 
 | File | Holds | Written by |
