@@ -950,16 +950,46 @@ function stopRun(){
   });
 }
 
+// A note captures a fresh reading first, which takes about 1.4s. Without a
+// guard the panel looks inert for that whole time, so the obvious thing to do
+// is press Enter again -- and the run gets the same note twice, seconds apart.
+// Clear the field and lock the controls IMMEDIATELY, restoring them only if the
+// request actually fails.
+var NOTE_BUSY = false;
+
 function addNote(text){
-  var value = (typeof text === "string") ? text : el("notetext").value;
+  if(NOTE_BUSY) return;
+  var typed = (typeof text !== "string");
+  var value = typed ? el("notetext").value : text;
   if(!value) return;
+
+  NOTE_BUSY = true;
+  if(typed){ el("notetext").value = ""; }
+  el("notebtn").disabled = true;
+  setNoteButtonsEnabled(false);
   el("status").textContent = "capturing…";
+
   post("/note", {text:value}, function(d){
-    if(d.error){ el("status").textContent = d.error; return; }
+    NOTE_BUSY = false;
+    el("notebtn").disabled = false;
+    setNoteButtonsEnabled(true);
+    if(d.error){
+      el("status").textContent = d.error;
+      if(typed){ el("notetext").value = value; }   // give it back to retype
+      return;
+    }
     el("status").textContent = "";
-    if(typeof text !== "string"){ el("notetext").value = ""; }
     applyStatus(d);
   });
+}
+
+function setNoteButtonsEnabled(on){
+  var host = el("notebtns");
+  for(var i = 0; i < host.children.length; i++){
+    if(host.children[i].tagName === "BUTTON"){
+      host.children[i].disabled = !on;
+    }
+  }
 }
 
 function renderNoteButtons(){
@@ -970,7 +1000,7 @@ function renderNoteButtons(){
     var btn = document.createElement("button");
     btn.textContent = b.label;
     btn.title = "logs: " + b.text;
-    btn.disabled = !RUNNING;
+    btn.disabled = !RUNNING || NOTE_BUSY;
     btn.onclick = function(){ addNote(b.text); };
     host.appendChild(btn);
   });
@@ -990,13 +1020,21 @@ function markSample(){
   });
 }
 
+var SAMPLE_BUSY = false;
+
 function logSample(id){
+  if(SAMPLE_BUSY) return;
+  SAMPLE_BUSY = true;
+  var button = el("sb_" + cssId(id));
+  if(button){ button.disabled = true; }
   post("/sample_log", {id:id,
                        sample_volume: el("sv_" + cssId(id)).value,
                        sample_temp: el("st_" + cssId(id)).value,
                        sample_abv:  el("sa_" + cssId(id)).value,
                        note:        el("sn_" + cssId(id)).value},
     function(d){
+      SAMPLE_BUSY = false;
+      if(button){ button.disabled = false; }
       if(d.error){ el("status").textContent = d.error; return; }
       el("status").textContent = "logged at " + d.logged.time.substr(11, 8);
       renderPending(d.pending_samples);
