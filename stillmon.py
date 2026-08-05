@@ -219,7 +219,11 @@ class Service(object):
                                    sample_abv, note,
                                    still_raw=match.get("still_raw", ""),
                                    still_value=match.get("still_value", ""),
-                                   sample_volume=sample_volume)
+                                   sample_volume=sample_volume,
+                                   abv_per_degree=float(self.settings.get(
+                                       "abv_correction_per_c", 0.30)),
+                                   abv_reference=float(self.settings.get(
+                                       "abv_reference_temp", 20.0)))
         pending = [e for e in pending if e.get("id") != sample_id]
         config.save_pending_samples(pending)
 
@@ -612,6 +616,18 @@ PAGE = r"""<!doctype html><html><head><meta charset="utf-8">
     A glare-induced misread can be perfectly plausible — a 1 read as a 7 turns
     16.2 into 76.2, which passes every other check. Physically impossible rates
     are logged as misreads instead of data.
+  </div>
+
+  <h3>Hydrometer correction</h3>
+  <div class="row">
+    <label>Subtract <input id="abv_correction_per_c" type="number" step="0.01"
+      style="width:70px"> % ABV per °C above
+      <input id="abv_reference_temp" type="number" step="0.5"
+      style="width:60px"> °C</label>
+  </div>
+  <div style="color:#778;font-size:11px;margin-top:4px">
+    Linear approximation. Calibrated against hand corrections at 30–33 °C and
+    85–95% ABV; it will drift from a proper table well outside that range.
   </div>
 
   <h3>Alerts</h3>
@@ -1358,7 +1374,8 @@ function renderSettingsForm(){
   });
 
   ["alert_delta","alert_misreads","alert_rise","plateau_window",
-   "plateau_tolerance","target_temp","max_rate_per_min"].forEach(function(k){
+   "plateau_tolerance","target_temp","max_rate_per_min",
+   "abv_correction_per_c","abv_reference_temp"].forEach(function(k){
     el(k).value = SETTINGS[k];
   });
   el("interval").value = SETTINGS.interval;
@@ -1377,7 +1394,8 @@ function saveSettings(){
                  duration_hours: +el("duration").value,
                  decimals: +el("decimals").value};
   ["alert_delta","alert_misreads","alert_rise","plateau_window",
-   "plateau_tolerance","target_temp","max_rate_per_min"].forEach(function(k){
+   "plateau_tolerance","target_temp","max_rate_per_min",
+   "abv_correction_per_c","abv_reference_temp"].forEach(function(k){
     payload[k] = +el(k).value;
   });
   post("/settings", payload, function(d){

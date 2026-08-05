@@ -45,8 +45,8 @@ import config
 #    notes, and never read by this software)
 # sample_temp is deliberately kept out of `value`: a cooled sample sitting at
 # 20 C would put a meaningless spike in the curve.
-CSV_HEADER = ["timestamp", "raw", "value", "note",
-              "sample_volume", "sample_temp", "sample_abv"]
+CSV_HEADER = ["timestamp", "raw", "value", "note", "sample_volume",
+              "sample_temp", "sample_abv", "sample_abv_corrected"]
 
 # Runs started before samples existed have a 4-column header. Appending
 # 6-column rows to those would produce a ragged file, so every append matches
@@ -631,8 +631,31 @@ class Runner(object):
         }
 
 
+def correct_abv(sample_abv, sample_temp, per_degree=0.30, reference=20.0):
+    """Temperature-correct an alcoholmeter reading.
+
+    An alcoholmeter is calibrated at `reference` and over-reads when the sample
+    is warmer, so a 95% reading at 33 C is not 95%.
+
+    This is the linear rule of thumb: subtract `per_degree` for each degree
+    above the reference. It is an APPROXIMATION -- the real correction is
+    non-linear and depends on the ABV as well as the temperature -- and is
+    accurate near the range it was calibrated against, not far outside it.
+    Returns "" when either input is missing or unparseable.
+    """
+    try:
+        abv = float(sample_abv)
+        temp = float(sample_temp)
+    except (TypeError, ValueError):
+        return ""
+    corrected = abv - per_degree * (temp - reference)
+    corrected = max(0.0, min(100.0, corrected))
+    return "%.1f" % corrected
+
+
 def log_sample(csv_path, timestamp, sample_temp="", sample_abv="", note="",
-               still_raw="", still_value="", sample_volume=""):
+               still_raw="", still_value="", sample_volume="",
+               abv_per_degree=0.30, abv_reference=20.0):
     """Write a collected-sample row at the time it was DRAWN, not now.
 
     A distillate sample has to cool before a hydrometer reading means anything,
@@ -648,8 +671,14 @@ def log_sample(csv_path, timestamp, sample_temp="", sample_abv="", note="",
         parts.append("{0} ml".format(sample_volume))
     if sample_temp != "":
         parts.append("{0} C".format(sample_temp))
+    corrected = correct_abv(sample_abv, sample_temp, abv_per_degree,
+                            abv_reference)
     if sample_abv != "":
-        parts.append("{0}% ABV".format(sample_abv))
+        if corrected:
+            parts.append("{0}% ABV (corrected {1}%)".format(
+                sample_abv, corrected))
+        else:
+            parts.append("{0}% ABV".format(sample_abv))
     # `still_value` is the still temperature -- the vapour temperature the
     # camera reads -- at the moment the sample was drawn. Named explicitly
     # explicitly, because the row now carries two temperatures and confusing
@@ -668,10 +697,11 @@ def log_sample(csv_path, timestamp, sample_temp="", sample_abv="", note="",
                           "note": summary,
                           "sample_volume": sample_volume,
                           "sample_temp": sample_temp,
-                          "sample_abv": sample_abv})
+                          "sample_abv": sample_abv,
+                          "sample_abv_corrected": corrected})
     return {"time": timestamp, "text": summary, "still_value": still_value,
-            "sample_volume": sample_volume,
-            "sample_temp": sample_temp, "sample_abv": sample_abv}
+            "sample_volume": sample_volume, "sample_temp": sample_temp,
+            "sample_abv": sample_abv, "sample_abv_corrected": corrected}
 
 
 def first_timestamp(csv_path):

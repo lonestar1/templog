@@ -107,6 +107,16 @@ SETTINGS_DEFAULTS = {
     # reading that matters into the top few percent of the chart.
     "chart_detail_band": 3.0,
 
+    # Hydrometer temperature correction. An alcoholmeter is calibrated at
+    # abv_reference_temp; read warmer than that and it over-reads. This is the
+    # LINEAR rule of thumb -- subtract a fixed amount per degree above the
+    # reference -- which is an approximation. The real correction is non-linear
+    # and varies with ABV. The default matches hand corrections measured across
+    # a real run (mean 0.30 %/C at 30-33 C and 85-95% ABV); it will drift from
+    # a proper table further from that range.
+    "abv_correction_per_c": 0.30,
+    "abv_reference_temp": 20.0,
+
     # alerts (see BUILD_DECISIONS.md section 9)
     "alert_delta": 5.0,         # |dT| between consecutive readings
     "alert_misreads": 3,        # consecutive misreads before warning
@@ -301,7 +311,8 @@ def load_settings():
             settings[key] = _coerce_int(saved[key], settings[key])
     for key in ("temp_min", "temp_max", "target_temp", "alert_delta",
                 "alert_rise", "plateau_tolerance", "max_rate_per_min",
-                "plateau_ramp_rate", "chart_detail_band"):
+                "plateau_ramp_rate", "chart_detail_band",
+                "abv_correction_per_c", "abv_reference_temp"):
         if key in saved:
             settings[key] = _coerce_float(saved[key], settings[key])
     settings["note_buttons"] = _clean_note_buttons(saved.get("note_buttons"))
