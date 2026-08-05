@@ -119,8 +119,11 @@ def _format_tick(value, step):
     return "%.0f" % value if float(value).is_integer() else "%.1f" % value
 
 
-def render_svg(run, settings=None, plateau=None):
-    """Return the chart as an SVG string."""
+def render_svg(run, settings=None, plateau=None, y_range=None):
+    """Return the chart as an SVG string.
+
+    y_range forces the vertical extent; without it the readings set it.
+    """
     settings = settings or {}
     points = run["points"]
     plot_w = WIDTH - MARGIN_LEFT - MARGIN_RIGHT
@@ -159,6 +162,8 @@ def render_svg(run, settings=None, plateau=None):
     if plateau is not None:
         low = min(low, plateau)
         high = max(high, plateau)
+    if y_range:
+        low, high = float(y_range[0]), float(y_range[1])
     axis_low, axis_high, step = _nice_y_axis(low, high)
     axis_span = axis_high - axis_low
 
@@ -291,6 +296,44 @@ def render_svg(run, settings=None, plateau=None):
     return "".join(out)
 
 
+def detail_run(run, settings=None, plateau=None):
+    """A second chart covering only the readings near the plateau.
+
+    On a distillation the ramp from ambient owns most of the vertical range --
+    a run from 20 C to 79 C puts every reading that matters, the fluctuation
+    around the plateau, inside the top few percent of the chart where it cannot
+    be read. A logarithmic axis makes that worse rather than better: it expands
+    the low end and compresses the high end, which is backwards here.
+
+    So the full run is still drawn, and a zoomed panel is added underneath.
+    Returns None when there is nothing worth zooming into.
+    """
+    settings = settings or {}
+    points = run["points"]
+    if len(points) < 20:
+        return None
+
+    values = [v for _, v in points]
+    span = max(values) - min(values)
+    band = float(settings.get("chart_detail_band", 3.0))
+    if span <= band * 2:
+        return None                       # already readable
+
+    focus = plateau
+    if focus is None:
+        target = float(settings.get("target_temp", 0) or 0)
+        focus = target if target and min(values) <= target <= max(values) \
+            else max(values)
+
+    near = [(t, v) for t, v in points if abs(v - focus) <= band]
+    if len(near) < 10:
+        return None
+
+    t0, t1 = near[0][0], near[-1][0]
+    notes = [n for n in run["notes"] if n.get("time") and t0 <= n["time"] <= t1]
+    return {"points": near, "notes": notes, "name": run["name"], "focus": focus}
+
+
 HTML_TEMPLATE = """<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>__TITLE__</title>
@@ -300,6 +343,9 @@ HTML_TEMPLATE = """<!doctype html><html><head><meta charset="utf-8">
   h1{font-size:17px;margin:0 0 2px;}
   .sub{color:#666;font-size:12px;margin-bottom:14px;}
   .chart{overflow-x:auto;}
+  .detail{margin-top:22px;}
+  .detail h2{font-size:13px;color:#444;margin:0 0 4px;font-weight:600;}
+  .detail .why{color:#777;font-size:11px;margin-bottom:6px;}
   svg{border:1px solid #e0e0e0;max-width:100%;height:auto;}
   table{border-collapse:collapse;margin-top:18px;font-size:13px;}
   th,td{text-align:left;padding:4px 12px 4px 0;
@@ -314,6 +360,7 @@ HTML_TEMPLATE = """<!doctype html><html><head><meta charset="utf-8">
 <h1>__TITLE__</h1>
 <div class="sub">__SUBTITLE__</div>
 <div class="chart">__SVG__</div>
+__DETAIL__
 __NOTES__
 </body></html>"""
 
@@ -323,6 +370,20 @@ def render_html(run, settings=None, plateau=None, generated=None):
     settings = settings or {}
     svg = render_svg(run, settings, plateau)
     points = run["points"]
+
+    zoom = detail_run(run, settings, plateau)
+    if zoom:
+        band = float((settings or {}).get("chart_detail_band", 3.0))
+        detail_html = (
+            '<div class="detail"><h2>Detail near {0:.1f} &#176;C</h2>'
+            '<div class="why">The full run above is dominated by the climb '
+            'from ambient. This panel shows only the {1} readings within '
+            '&#177;{2:.0f} &#176;C of it, so the fluctuation is readable.</div>'
+            '<div class="chart">{3}</div></div>').format(
+                zoom["focus"], len(zoom["points"]), band,
+                render_svg(zoom, settings, plateau))
+    else:
+        detail_html = ""
 
     if points:
         subtitle = "{0} → {1}".format(
@@ -354,6 +415,7 @@ def render_html(run, settings=None, plateau=None, generated=None):
     html = html.replace("__TITLE__", _escape(run["name"]))
     html = html.replace("__SUBTITLE__", _escape(subtitle))
     html = html.replace("__SVG__", svg)
+    html = html.replace("__DETAIL__", detail_html)
     html = html.replace("__NOTES__", notes_html)
     return html
 

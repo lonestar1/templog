@@ -102,6 +102,10 @@ SETTINGS_DEFAULTS = {
 
     # chart
     "target_temp": 78.3,        # horizontal marker line; 0 = off
+    # The zoomed second chart covers readings within this many degrees of the
+    # plateau. A distillation's ramp from ambient otherwise squeezes every
+    # reading that matters into the top few percent of the chart.
+    "chart_detail_band": 3.0,
 
     # alerts (see BUILD_DECISIONS.md section 9)
     "alert_delta": 5.0,         # |dT| between consecutive readings
@@ -297,7 +301,7 @@ def load_settings():
             settings[key] = _coerce_int(saved[key], settings[key])
     for key in ("temp_min", "temp_max", "target_temp", "alert_delta",
                 "alert_rise", "plateau_tolerance", "max_rate_per_min",
-                "plateau_ramp_rate"):
+                "plateau_ramp_rate", "chart_detail_band"):
         if key in saved:
             settings[key] = _coerce_float(saved[key], settings[key])
     settings["note_buttons"] = _clean_note_buttons(saved.get("note_buttons"))
