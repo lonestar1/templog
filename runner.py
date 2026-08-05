@@ -355,11 +355,23 @@ class Runner(object):
             self.save_chart()
 
     def _next_index(self):
-        """Where on the grid we are -- non-zero when resuming."""
+        """Which slot on the schedule grid to aim at next.
+
+        No `+ 1`. A fresh start has an elapsed of a few milliseconds -- enough
+        to be positive -- so adding one pushed the first target a whole
+        interval into the future and the run captured nothing until then. At a
+        30s interval that is a visibly dead panel right after pressing Start.
+
+        Flooring instead gives slot 0 on a fresh start, so the first capture is
+        immediate. On a resume it gives a slot already in the past, so the
+        delay is negative and a reading is taken straight away -- also what you
+        want after a restart -- and the loop's skip-ahead then puts it back on
+        the grid.
+        """
         elapsed = time.time() - self.started_at
         if elapsed <= 0:
             return 0
-        return int(elapsed // self.interval) + 1
+        return int(elapsed // self.interval)
 
     def _duration_elapsed(self):
         if self.duration_hours <= 0:

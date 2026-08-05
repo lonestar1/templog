@@ -355,6 +355,8 @@ PAGE = r"""<!doctype html><html><head><meta charset="utf-8">
   .tabbtn.active{background:#111;color:#eee;border-bottom:1px solid #111;}
   .tabbtn:disabled{opacity:.35;cursor:not-allowed;}
   #setuplocked{display:none;color:#e8a33d;font-size:11px;margin-left:10px;}
+  #unsaved{display:none;color:#e8a33d;font-size:12px;}
+  .tabbtn.dirty::after{content:" •";color:#e8a33d;}
   .tab{display:none;}
   .tab.active{display:block;}
 
@@ -531,6 +533,7 @@ PAGE = r"""<!doctype html><html><head><meta charset="utf-8">
   <div class="row" style="margin-bottom:6px">
     <button onclick="grab()">Grab new frame</button>
     <button onclick="save()">Save tuning</button>
+    <span id="unsaved">unsaved changes — the logger uses the SAVED tuning</span>
     <label title="ssocr wants dark digits on a light background">
       <input id="invert" type="checkbox" onchange="setInvert()">
       Invert <span style="color:#778">(on = LED, off = LCD)</span></label>
@@ -692,6 +695,7 @@ IDS.forEach(function(id){
   el(id).addEventListener("input", function(){
     el(id + "_v").textContent = el(id).value;
     CROP[id] = +el(id).value;
+    markDirty();
     drawBox();
     schedule();
   });
@@ -784,7 +788,9 @@ function setResolution(){
   post("/resolution", {w:+parts[0], h:+parts[1]}, function(d){
     if(d.error){ el("status").textContent = d.error; return; }
     CROP = d.crop;
+    SAVED_CROP = JSON.parse(JSON.stringify(d.crop));
     loadValues();
+    markDirty();
     el("status").textContent = "crop rescaled — re-check the reading";
     grab();
   });
@@ -818,6 +824,7 @@ function setDecimals(){
 // the moment it is switched off.
 function setInvert(){
   CROP.invert = el("invert").checked;
+  markDirty();
   refresh();
 }
 
@@ -866,7 +873,9 @@ function loadPreset(){
   post("/preset_load", {name:name}, function(d){
     if(d.error){ el("presetstatus").textContent = d.error; return; }
     CROP = d.crop;
+    SAVED_CROP = JSON.parse(JSON.stringify(d.crop));
     loadValues();
+    markDirty();
     el("presetstatus").textContent = "loaded " + name;
     grab();
   });
@@ -887,7 +896,12 @@ function save(){
       headers:{"Content-Type":"application/json"},
       body: JSON.stringify(params())})
     .then(function(r){ return r.text(); })
-    .then(function(t){ el("status").textContent = t; })
+    .then(function(t){
+      el("status").textContent = t;
+      SAVED_CROP = JSON.parse(JSON.stringify(CROP));
+      SAVED_CROP.invert = el("invert").checked;
+      markDirty();
+    })
     .catch(function(e){ el("status").textContent = "save failed: " + e; });
 }
 
@@ -901,6 +915,14 @@ function post(path, body, done){
 }
 
 function startRun(){
+  if(tuningDirty() && !confirm(
+      "The tuning on screen has not been saved.\n\n" +
+      "The logger reads the saved tuning, not the sliders, so this run will " +
+      "use the OLD values and may misread every reading.\n\n" +
+      "Start anyway?")){
+    showTab("tuning");
+    return;
+  }
   el("status").textContent = "starting…";
   post("/start", {interval:+el("interval").value,
                   duration_hours:+el("duration").value,
@@ -985,6 +1007,33 @@ function cancelSample(id){
 
 // ISO timestamps contain characters that are awkward in element ids
 function cssId(id){ return id.replace(/[^a-zA-Z0-9]/g, ""); }
+
+// The tuner preview reflects the LIVE sliders, but the logger reads the SAVED
+// crop.json. When they differ the panel looks perfect while every reading
+// misreads, which is invisible until the run produces nothing. Track the saved
+// state and say so plainly.
+var SAVED_CROP = JSON.parse(JSON.stringify(CROP));
+
+function tuningDirty(){
+  var p = params();
+  var keys = IDS.concat(["invert"]);
+  for(var i = 0; i < keys.length; i++){
+    var k = keys[i];
+    var live = (k === "invert") ? (el("invert").checked ? 1 : 0) : +p[k];
+    var saved = (k === "invert") ? (SAVED_CROP.invert !== false ? 1 : 0)
+                                 : +SAVED_CROP[k];
+    if(live !== saved) return true;
+  }
+  return false;
+}
+
+function markDirty(){
+  var dirty = tuningDirty();
+  el("unsaved").style.display = dirty ? "inline" : "none";
+  el("tab_tuning_btn").className =
+    (el("tab_tuning_btn").className.replace(" dirty", "")) +
+    (dirty ? " dirty" : "");
+}
 
 var PENDING_KEY = null;          // which samples are currently on screen
 var SAMPLE_FIELDS = ["sv_", "st_", "sa_", "sn_"];
@@ -1292,6 +1341,7 @@ function saveSettings(){
 
 /* ------------------------------------------------------------------ init */
 loadValues();
+markDirty();
 renderSettingsForm();
 renderNoteButtons();
 showMeta();
