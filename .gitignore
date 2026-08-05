@@ -42,3 +42,6 @@ deploy.env
 
 # Per-machine tuning presets
 presets.json
+
+# Pending sample state — per-machine runtime data
+pending_samples.json
