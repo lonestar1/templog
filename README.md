@@ -18,9 +18,15 @@ exact 30.00 s cadence across service restarts.
 - **Annotates** runs with notes that capture a reading *immediately* rather than waiting for the
   next interval, including six configurable one-tap buttons
 - **Charts** each run as a self-contained HTML file with note markers, a target line and the
-  detected plateau
+  detected plateau, plus a zoomed second panel around the plateau — on a run from 18 °C to
+  79 °C the fluctuation that matters occupies about 5% of the main chart's height
+- **Validates** every reading: a range gate, and a rate-of-change gate that rejects
+  physically impossible jumps. A glare misread turning a `1` into a `7` reads 76.2 instead of
+  16.2 and passes every other check; 120 °C/min does not
 - **Watches** run health: consecutive-misread alerts, sudden-jump alerts, rate of change in
   °C/min, and a "process likely finished" alert when the temperature rises off a plateau
+- **Works on a phone** — the panel is laid out for a small screen, so a run can be checked
+  from anywhere on the LAN
 - **Survives** power cuts — systemd restarts the service and the run resumes into the same CSV,
   on the original schedule grid
 
@@ -274,9 +280,18 @@ overlap. On this rig that gave 12–76 lit, 14–52 dark, so 33 — a value with
 margin in both conditions, where the reading that merely "works" was sitting 8 points from
 failure.
 
+If the sliders differ from what's saved, the panel says **"unsaved changes — the logger uses
+the SAVED tuning"** and marks the Tuning tab. The preview follows the sliders, but the logger
+reads `crop.json`, so an unsaved change means a perfect-looking panel and a run that misreads
+every frame. Starting a run in that state asks for confirmation.
+
 **Then run.** Set interval and duration on Setup (duration 0 = until stopped), switch to
 Monitor, press Start. Add notes as events happen — "first drops", "hearts", "tails" ship as
 one-tap buttons and every button is editable, including what text it writes to the log.
+
+Charts omit the service's own markers — run stopped, logging resumed, service restarted — so
+they read as a process record. The **include service markers** checkbox next to the chart
+buttons brings them back when you are diagnosing an interruption rather than reading the run.
 
 **Afterwards.** Each run appears in the runs list with its reading and note counts. View the
 chart live at any time, save it to disk, download the CSV, resume a run that was stopped too
@@ -307,6 +322,8 @@ working temperature, cool it to 20 °C, measure again, and divide the difference
 | `crop.json` | Tuning: crop box, top-trim, threshold, brightness, contrast, capture resolution | Save on the tuning panel |
 | `settings.json` | Interval, duration, decimals, alert thresholds, note buttons, target line | Save on the settings panel |
 | `run_state.json` | Present only while a run is active; drives crash recovery | The service, on start/stop |
+| `presets.json` | Named tuning presets, one per display | Save as… on the tuning panel |
+| `pending_samples.json` | Samples marked but not yet filled in | Marking and logging samples |
 
 `settings.json` and `run_state.json` are gitignored — they're per-machine state. `crop.json` is
 committed as an example, but it belongs to one specific camera position and **you will need to
@@ -324,8 +341,17 @@ touch the disk when you ask, or once when a run ends.
 - `value` — parsed float as a string, e.g. `16.5`; empty on a misread or an out-of-range read
 - `note` — free text, empty on normal readings
 
-A reading is valid only if it has exactly the expected digit count and falls inside
-`temp_min`…`temp_max` (default −40…120 °C). Anything else is written with a blank `value`, so
+Two gates guard a reading. It must have exactly the expected digit count and fall inside
+`temp_min`…`temp_max` (default −40…120 °C); and it must not imply a rate of change above
+`max_rate_per_min`. The second exists because the first cannot catch a *plausible* misread —
+glare on an unlit segment turns 16.2 into 76.2, which is a perfectly ordinary temperature.
+Nothing physical moves that fast, so an impossible rate is the tell.
+
+Set `max_rate_per_min` to suit the equipment: a directly-heated still ramps at 25 °C/min
+during heat-up, so a limit of 20 discards good data. A rejected reading keeps its raw `ssocr`
+string, so it is recoverable from the CSV rather than lost.
+
+ Anything else is written with a blank `value`, so
 misreads are visible in the data rather than silently dropped. Rows with a blank `value` are
 excluded from the chart.
 
