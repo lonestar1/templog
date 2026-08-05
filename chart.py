@@ -82,6 +82,12 @@ def load_run(path):
                 points.append((stamp, value))
             if note:
                 notes.append({"time": stamp, "value": value, "text": note})
+    # Number the notes here, once. The marker numbers appear on the full
+    # chart, on the zoomed detail chart and in the table, and the detail
+    # chart draws a SUBSET -- so anything that renumbers per-chart makes
+    # marker 1 in the detail panel mean note 5 everywhere else.
+    for position, note in enumerate(notes, start=1):
+        note["index"] = position
     return {"points": points, "notes": notes,
             "name": os.path.basename(path)}
 
@@ -259,7 +265,8 @@ def render_svg(run, settings=None, plateau=None, y_range=None):
                                when.strftime("%H:%M:%S"), value))
 
     # -- note markers, numbered to match the list below
-    for index, note in enumerate(run["notes"], start=1):
+    for position, note in enumerate(run["notes"], start=1):
+        index = note.get("index", position)
         when = note["time"]
         if when < t0 or when > t1:
             continue
@@ -329,9 +336,16 @@ def detail_run(run, settings=None, plateau=None):
     if len(near) < 10:
         return None
 
+    # The band picks the PERIOD, not the points. Filtering by value would drop
+    # any excursion outside it -- and an excursion is exactly what you want to
+    # see in a zoomed view. Take every reading between the first and last time
+    # the run was near the focus, so spikes stay on the curve and the axis
+    # grows to fit them.
     t0, t1 = near[0][0], near[-1][0]
+    window = [(t, v) for t, v in points if t0 <= t <= t1]
     notes = [n for n in run["notes"] if n.get("time") and t0 <= n["time"] <= t1]
-    return {"points": near, "notes": notes, "name": run["name"], "focus": focus}
+    return {"points": window, "notes": notes, "name": run["name"],
+            "focus": focus}
 
 
 HTML_TEMPLATE = """<!doctype html><html><head><meta charset="utf-8">
@@ -377,8 +391,9 @@ def render_html(run, settings=None, plateau=None, generated=None):
         detail_html = (
             '<div class="detail"><h2>Detail near {0:.1f} &#176;C</h2>'
             '<div class="why">The full run above is dominated by the climb '
-            'from ambient. This panel shows only the {1} readings within '
-            '&#177;{2:.0f} &#176;C of it, so the fluctuation is readable.</div>'
+            'from ambient. This panel covers the {1} readings from when it '
+            'first came within &#177;{2:.0f} &#176;C of that, so the '
+            'fluctuation is readable -- excursions included.</div>'
             '<div class="chart">{3}</div></div>').format(
                 zoom["focus"], len(zoom["points"]), band,
                 render_svg(zoom, settings, plateau))
@@ -398,7 +413,8 @@ def render_html(run, settings=None, plateau=None, generated=None):
     if run["notes"]:
         rows = ["<table><tr><th></th><th>time</th><th>temp</th>"
                 "<th>note</th></tr>"]
-        for index, note in enumerate(run["notes"], start=1):
+        for position, note in enumerate(run["notes"], start=1):
+            index = note.get("index", position)
             rows.append(
                 '<tr><td class="n">{0}</td><td class="v">{1}</td>'
                 '<td class="v">{2}</td><td>{3}</td></tr>'.format(
