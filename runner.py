@@ -45,7 +45,8 @@ import config
 #    notes, and never read by this software)
 # sample_temp is deliberately kept out of `value`: a cooled sample sitting at
 # 20 C would put a meaningless spike in the curve.
-CSV_HEADER = ["timestamp", "raw", "value", "note", "sample_temp", "sample_abv"]
+CSV_HEADER = ["timestamp", "raw", "value", "note",
+              "sample_volume", "sample_temp", "sample_abv"]
 
 # Runs started before samples existed have a 4-column header. Appending
 # 6-column rows to those would produce a ragged file, so every append matches
@@ -150,6 +151,7 @@ class Runner(object):
             self.duration_hours = float(
                 resume_state.get("duration_hours", self.duration_hours))
             self._load_existing(self.csv_path)
+            self._derive_seen_ramp()
         else:
             # Minute-granular names collide if a run is stopped and restarted
             # within the same minute -- which silently merges two runs into one
@@ -278,6 +280,35 @@ class Runner(object):
                                            "text": note})
         except (OSError, ValueError) as exc:
             print("runner: could not reload {0}: {1}".format(path, exc))
+
+    def _derive_seen_ramp(self):
+        """Recover the "has it ramped?" flag from a resumed run's history.
+
+        Without this, restarting DURING a plateau is unrecoverable: the flag
+        starts false, the rate at a plateau is zero by definition, so it can
+        never become true again -- and the plateau is therefore never detected
+        and the process-finished alert never fires for the rest of the run.
+        A restart in the middle of a four-hour distillation would silently cost
+        exactly the signal the run is being watched for.
+        """
+        settings = self.service.settings
+        ramp_rate = float(settings.get("plateau_ramp_rate", 0.5))
+        window = max(2, int(settings.get("rate_window", 5)))
+
+        # Measured over the SAME window as rate_per_minute(), not between
+        # consecutive readings. OCR jitter of 0.2 C across a 15s interval
+        # computes as 0.8 deg/min on a pair, which is enough to call a dead
+        # flat ambient run a ramp -- the exact false positive this flag exists
+        # to prevent.
+        for index in range(window, len(self.readings) + 1):
+            points = self.readings[index - window:index]
+            span = points[-1][0] - points[0][0]
+            if span <= 0:
+                continue
+            rate = abs(points[-1][1] - points[0][1]) / span * 60.0
+            if rate >= ramp_rate:
+                self.seen_ramp = True
+                return
 
     # ---------------------------------------------------------------- loop
 
@@ -589,7 +620,7 @@ class Runner(object):
 
 
 def log_sample(csv_path, timestamp, sample_temp="", sample_abv="", note="",
-               still_raw="", still_value=""):
+               still_raw="", still_value="", sample_volume=""):
     """Write a collected-sample row at the time it was DRAWN, not now.
 
     A distillate sample has to cool before a hydrometer reading means anything,
@@ -601,6 +632,8 @@ def log_sample(csv_path, timestamp, sample_temp="", sample_abv="", note="",
     have none. Markers are positioned by their timestamp, not by file order.
     """
     parts = []
+    if sample_volume != "":
+        parts.append("{0} ml".format(sample_volume))
     if sample_temp != "":
         parts.append("{0} C".format(sample_temp))
     if sample_abv != "":
@@ -609,9 +642,10 @@ def log_sample(csv_path, timestamp, sample_temp="", sample_abv="", note="",
     # camera reads -- at the moment the sample was drawn. Named explicitly
     # explicitly, because the row now carries two temperatures and confusing
     # them would make the record useless.
-    head = "sample" if not still_value else "sample (still {0} C)".format(
-        still_value)
-    summary = head + ": " + ", ".join(parts) if parts else head
+    # The still temperature is NOT repeated here: it goes in the row's value
+    # column, which is what the chart's temperature column shows. Putting it in
+    # the description too just says the same number twice.
+    summary = "sample: " + ", ".join(parts) if parts else "sample"
     if note:
         summary += " -- " + note
 
@@ -620,9 +654,11 @@ def log_sample(csv_path, timestamp, sample_temp="", sample_abv="", note="",
     append_row(csv_path, {"timestamp": timestamp,
                           "raw": still_raw, "value": still_value,
                           "note": summary,
+                          "sample_volume": sample_volume,
                           "sample_temp": sample_temp,
                           "sample_abv": sample_abv})
     return {"time": timestamp, "text": summary, "still_value": still_value,
+            "sample_volume": sample_volume,
             "sample_temp": sample_temp, "sample_abv": sample_abv}
 
 

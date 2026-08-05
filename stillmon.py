@@ -196,7 +196,8 @@ class Service(object):
         config.save_pending_samples(pending)
         return pending
 
-    def log_sample(self, sample_id, sample_temp="", sample_abv="", note=""):
+    def log_sample(self, sample_id, sample_temp="", sample_abv="", note="",
+                   sample_volume=""):
         """Fill in a marked sample and write it at its ORIGINAL timestamp."""
         pending = config.load_pending_samples()
         match = None
@@ -206,8 +207,9 @@ class Service(object):
                 break
         if match is None:
             raise ValueError("no pending sample with that id")
-        if sample_temp == "" and sample_abv == "" and not note:
-            raise ValueError("enter a temperature, an ABV, or a note")
+        if (sample_temp == "" and sample_abv == "" and sample_volume == ""
+                and not note):
+            raise ValueError("enter a volume, temperature, ABV, or a note")
 
         path = self.run_path(match.get("csv"), (".csv",))
         if not os.path.exists(path):
@@ -216,7 +218,8 @@ class Service(object):
         logged = runner.log_sample(path, match["time"], sample_temp,
                                    sample_abv, note,
                                    still_raw=match.get("still_raw", ""),
-                                   still_value=match.get("still_value", ""))
+                                   still_value=match.get("still_value", ""),
+                                   sample_volume=sample_volume)
         pending = [e for e in pending if e.get("id") != sample_id]
         config.save_pending_samples(pending)
 
@@ -961,6 +964,7 @@ function markSample(){
 
 function logSample(id){
   post("/sample_log", {id:id,
+                       sample_volume: el("sv_" + cssId(id)).value,
                        sample_temp: el("st_" + cssId(id)).value,
                        sample_abv:  el("sa_" + cssId(id)).value,
                        note:        el("sn_" + cssId(id)).value},
@@ -983,7 +987,7 @@ function cancelSample(id){
 function cssId(id){ return id.replace(/[^a-zA-Z0-9]/g, ""); }
 
 var PENDING_KEY = null;          // which samples are currently on screen
-var SAMPLE_FIELDS = ["st_", "sa_", "sn_"];
+var SAMPLE_FIELDS = ["sv_", "st_", "sa_", "sn_"];
 
 function ageText(iso){
   var mins = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
@@ -1047,6 +1051,8 @@ function renderPending(pending){
         ageText(s.time) + '</span>' +
       '<span style="color:#6f6;font-size:11px">still ' +
         (s.still_value ? s.still_value + " °C" : "?") + '</span>' +
+      '<label>vol <input id="sv_' + k + '" type="number" step="1" ' +
+        'style="width:70px"> ml</label>' +
       '<label>temp <input id="st_' + k + '" type="number" step="0.1" ' +
         'style="width:70px"> °C</label>' +
       '<label>ABV <input id="sa_' + k + '" type="number" step="0.1" ' +
@@ -1593,7 +1599,8 @@ class Handler(server.BaseHTTPRequestHandler):
                     data.get("id"),
                     str(data.get("sample_temp", "")).strip(),
                     str(data.get("sample_abv", "")).strip(),
-                    str(data.get("note", "")).strip())
+                    str(data.get("note", "")).strip(),
+                    str(data.get("sample_volume", "")).strip())
             except ValueError as exc:
                 self._json({"error": str(exc)}, code=400)
                 return
