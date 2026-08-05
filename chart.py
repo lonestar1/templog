@@ -41,6 +41,8 @@ MARGIN_BOTTOM = 44
 # candidate axis steps, in degrees
 Y_STEPS = [0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100]
 
+_CLIP_SEQ = [0]
+
 
 def _escape(text):
     return (str(text).replace("&", "&amp;").replace("<", "&lt;")
@@ -205,9 +207,19 @@ def render_svg(run, settings=None, plateau=None, y_range=None):
     def sy(value):
         return MARGIN_TOP + plot_h - ((value - axis_low) / axis_span) * plot_h
 
+    _CLIP_SEQ[0] += 1
+    clip_id = "plot{0}".format(_CLIP_SEQ[0])
+
     out = ['<svg xmlns="http://www.w3.org/2000/svg" width="{0}" height="{1}" '
            'viewBox="0 0 {0} {1}" font-family="system-ui,sans-serif">'
            .format(WIDTH, HEIGHT)]
+    # Everything plotted is clipped to the plot area, so a fixed y range can
+    # stay fixed. Without this a single excursion either stretches the axis --
+    # destroying the zoom the panel exists for -- or draws the curve straight
+    # over the labels.
+    out.append('<defs><clipPath id="{0}"><rect x="{1}" y="{2}" width="{3}" '
+               'height="{4}"/></clipPath></defs>'.format(
+                   clip_id, MARGIN_LEFT, MARGIN_TOP, plot_w, plot_h))
     out.append('<rect width="{0}" height="{1}" fill="#ffffff"/>'
                .format(WIDTH, HEIGHT))
 
@@ -276,6 +288,7 @@ def render_svg(run, settings=None, plateau=None, y_range=None):
     # -- the curve
     coords = " ".join("{0:.1f},{1:.1f}".format(sx(t), sy(v))
                       for t, v in points)
+    out.append('<g clip-path="url(#{0})">'.format(clip_id))
     out.append('<polyline points="{0}" fill="none" stroke="{1}" '
                'stroke-width="1.8" stroke-linejoin="round"/>'
                .format(coords, LINE_COLOUR))
@@ -290,6 +303,8 @@ def render_svg(run, settings=None, plateau=None, y_range=None):
                        .format(sx(when), sy(value), LINE_COLOUR,
                                when.strftime("%H:%M:%S"), value))
 
+    out.append('</g>')
+
     # -- note markers, numbered to match the list below
     for position, note in enumerate(run["notes"], start=1):
         index = note.get("index", position)
@@ -297,7 +312,13 @@ def render_svg(run, settings=None, plateau=None, y_range=None):
         if when < t0 or when > t1:
             continue
         x = sx(when)
-        y = sy(note["value"]) if note["value"] is not None else MARGIN_TOP + 10
+        # clamped, not clipped -- a note whose reading sits outside the range
+        # would otherwise vanish, and the note still happened
+        if note["value"] is not None:
+            y = min(max(sy(note["value"]), MARGIN_TOP + 8),
+                    MARGIN_TOP + plot_h - 8)
+        else:
+            y = MARGIN_TOP + 10
         out.append('<line x1="{0:.1f}" y1="{1}" x2="{0:.1f}" y2="{2}" '
                    'stroke="{3}" stroke-width="1" stroke-dasharray="3 3" '
                    'opacity="0.7"/>'
@@ -370,8 +391,14 @@ def detail_run(run, settings=None, plateau=None):
     t0, t1 = near[0][0], near[-1][0]
     window = [(t, v) for t, v in points if t0 <= t <= t1]
     notes = [n for n in run["notes"] if n.get("time") and t0 <= n["time"] <= t1]
+    # A FIXED range, not one fitted to the data. Late in a run the still can
+    # swing tens of degrees; auto-fitting to that stretches the axis back out
+    # and the panel stops being a zoom at all. Excursions run off the top or
+    # bottom and rejoin when they return -- which is what a zoom should do.
+    span = (focus - band, focus + band)
+    outside = sum(1 for _, v in window if v < span[0] or v > span[1])
     return {"points": window, "notes": notes, "name": run["name"],
-            "focus": focus}
+            "focus": focus, "y_range": span, "outside": outside}
 
 
 HTML_TEMPLATE = """<!doctype html><html><head><meta charset="utf-8">
@@ -422,9 +449,14 @@ def render_html(run, settings=None, plateau=None, generated=None,
             'from ambient. This panel covers the {1} readings from when it '
             'first came within &#177;{2:.0f} &#176;C of that, so the '
             'fluctuation is readable -- excursions included.</div>'
-            '<div class="chart">{3}</div></div>').format(
+            '{4}<div class="chart">{3}</div></div>').format(
                 zoom["focus"], len(zoom["points"]), band,
-                render_svg(zoom, settings, plateau))
+                render_svg(zoom, settings, plateau,
+                           y_range=zoom.get("y_range")),
+                ('<div class="why">%d readings run off this scale and rejoin '
+                 'the curve when they return -- see the full chart above for '
+                 'their extent.</div>' % zoom["outside"])
+                if zoom.get("outside") else "")
     else:
         detail_html = ""
 
