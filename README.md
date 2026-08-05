@@ -444,3 +444,7 @@ sim/           a real captured frame, used by --sim
 The project began as two standalone scripts, `tuner.py` and `logger.py`, driven over SSH with
 `nohup`. They were removed once the service replaced them; the first commit still has them if
 you want to see the original capture/OCR pipeline in its simplest form.
+
+## Licence
+
+MIT — see [LICENSE](LICENSE). Use it, change it, build on it; no warranty.
